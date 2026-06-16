@@ -1,0 +1,16 @@
+body {
+  margin: 0;
+  background-color: #0a0e17;
+  font-family: 'Roboto', sans-serif;
+  color: #ffffff;
+}
+
+/* Custom Scrollbar for Dark Theme */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 10px;
+}

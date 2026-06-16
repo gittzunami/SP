@@ -1,0 +1,35 @@
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+pypdf>=4.0.0
+python-docx>=1.1.0
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
+apscheduler>=3.10.4
+
+# ── HTTP / scraping ───────────────────────────────────────────────────────────
+requests>=2.31.0
+beautifulsoup4>=4.12.3
+lxml>=5.0.0
+scrapingbee>=2.0.0
+apify-client>=1.7.0
+playwright>=1.44.0
+
+# ── Data validation ───────────────────────────────────────────────────────────
+pydantic>=2.7.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
+# ── Environment variables (.env file auto-loading) ────────────────────────────
+python-dotenv>=1.0.0
+
+# ── Auth (JWT + password hashing) ─────────────────────────────────────────────
+python-jose[cryptography]>=3.3.0
+
+# ── LLMs ──────────────────────────────────────────────────────────────────────
+openai>=1.0.0
+anthropic>=0.25.0
+google-generativeai>=0.5.0
