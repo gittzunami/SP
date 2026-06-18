@@ -1,24 +1,32 @@
 import React, { useState } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { Box } from "@mui/material";
-import Sidebar          from "./Components/Sidebar";
-import TopBar           from "./Components/TopBar";
-import Dashboard        from "./Pages/Dashboard";
-import Scraping         from "./Pages/Scraping";
-import Results          from "./Pages/Results";
-import Trends           from "./Pages/Trends";
-import Newsletter       from "./Pages/Newsletter";
-import CostGovernance   from "./Pages/CostGovernance";
-import LLMConfiguration from "./Pages/LLMConfiguration";
-import SmartBrain       from "./Pages/SmartBrain";
-import Login            from "./Pages/Login";
-import { BudgetProvider }     from "./BudgetContext";
-import GlobalBudgetBanner     from "./GlobalBudgetBanner";
-import { AppThemeProvider, useAppTheme } from "./AppThemeContext";
-import { NotificationProvider } from "./NotificationContext";
-import { AuthProvider, useAuth } from "./AuthContext";
 
-// Redirects to /login if token is absent
+// ── Shared layout components ──────────────────────────────────────────────────
+import { Sidebar, TopBar } from "./shared/components";
+
+// ── Feature pages (imported via feature index — colocated with their domain) ─
+import Dashboard        from "./features/dashboard";
+import Scraping         from "./features/scraping";
+import Results          from "./features/results";
+import Trends           from "./features/trends";
+import Newsletter       from "./features/newsletter";
+import CostGovernance   from "./features/cost-governance";
+import LLMConfiguration from "./features/llm";
+import SmartBrain       from "./features/smart-brain";
+
+// ── Auth page (not a "feature" — no domain data) ─────────────────────────────
+import Login from "./Pages/Login";
+
+// ── App-wide contexts (from core layer) ──────────────────────────────────────
+import { BudgetProvider }             from "./core/contexts";
+import { AppThemeProvider, useAppTheme } from "./core/contexts";
+import { NotificationProvider }       from "./core/contexts";
+import { AuthProvider, useAuth }      from "./core/contexts";
+
+import GlobalBudgetBanner from "./GlobalBudgetBanner";
+
+
 function PrivateRoute({ children }) {
   const { isAuthenticated } = useAuth();
   return isAuthenticated ? children : <Navigate to="/login" replace />;
@@ -26,8 +34,8 @@ function PrivateRoute({ children }) {
 
 function AppInner() {
   const { C } = useAppTheme();
-  const [collapsed,   setCollapsed]   = useState(false);
-  const [mobileOpen,  setMobileOpen]  = useState(false);
+  const [collapsed,  setCollapsed]  = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const sidebarW = collapsed ? 64 : 260;
 
   return (
@@ -67,10 +75,10 @@ function AppInner() {
                     />
                     <Box
                       sx={{
-                        p:        { xs: 2, sm: 3, md: 4 },
-                        mt:       "56px",
-                        bgcolor:  C.bg,
-                        height:   "calc(100vh - 56px)",
+                        p:         { xs: 2, sm: 3, md: 4 },
+                        mt:        "56px",
+                        bgcolor:   C.bg,
+                        height:    "calc(100vh - 56px)",
                         overflowY: "auto",
                         overflowX: "hidden",
                         minWidth:  0,
@@ -80,14 +88,14 @@ function AppInner() {
                     >
                       <Box sx={{ flex: 1 }}>
                         <Routes>
-                          <Route path="/"           element={<Dashboard />} />
-                          <Route path="/scraping"   element={<Scraping />} />
-                          <Route path="/results"    element={<Results />} />
-                          <Route path="/trends"     element={<Trends />} />
-                          <Route path="/newsletter" element={<Newsletter />} />
-                          <Route path="/cost"       element={<CostGovernance />} />
+                          <Route path="/"             element={<Dashboard />} />
+                          <Route path="/scraping"     element={<Scraping />} />
+                          <Route path="/results"      element={<Results />} />
+                          <Route path="/trends"       element={<Trends />} />
+                          <Route path="/newsletter"   element={<Newsletter />} />
+                          <Route path="/cost"         element={<CostGovernance />} />
                           <Route path="/llm-config"   element={<LLMConfiguration />} />
-                          <Route path="/smart-brain" element={<SmartBrain />} />
+                          <Route path="/smart-brain"  element={<SmartBrain />} />
                         </Routes>
                       </Box>
 

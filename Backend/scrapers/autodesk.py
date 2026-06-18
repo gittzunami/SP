@@ -41,6 +41,7 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+LANGUAGE_FILTER     = "AND language = 'English'"
 ALL_CONTENT_TYPES   = ["forum", "qanda", "tkb", "blog", "idea"]
 CONTENT_TYPE_LABELS = {
     "forum": "Forum Discussions",
@@ -165,6 +166,7 @@ def _search_by_type(keyword: str, style: str, limit: int, offset: int = 0) -> Li
             f"SELECT * FROM messages "
             f"WHERE (subject MATCHES '{kw}' OR body MATCHES '{kw}') "
             f"AND conversation.style = '{style}' AND depth = 0 "
+            f"{LANGUAGE_FILTER} "
             f"ORDER BY post_time DESC LIMIT {limit} OFFSET {offset}",
             f"{style}:subject_or_body",
         ),
@@ -172,6 +174,7 @@ def _search_by_type(keyword: str, style: str, limit: int, offset: int = 0) -> Li
             f"SELECT * FROM messages "
             f"WHERE subject MATCHES '{kw}' "
             f"AND conversation.style = '{style}' AND depth = 0 "
+            f"{LANGUAGE_FILTER} "
             f"ORDER BY post_time DESC LIMIT {limit} OFFSET {offset}",
             f"{style}:subject",
         ),
@@ -179,6 +182,7 @@ def _search_by_type(keyword: str, style: str, limit: int, offset: int = 0) -> Li
             f"SELECT * FROM messages "
             f"WHERE tags.text IN ('{kw}') "
             f"AND conversation.style = '{style}' AND depth = 0 "
+            f"{LANGUAGE_FILTER} "
             f"ORDER BY post_time DESC LIMIT {limit} OFFSET {offset}",
             f"{style}:tags",
         ),
@@ -194,6 +198,7 @@ def _fetch_replies(message_id: str, limit: int) -> List[dict]:
     query = (
         f"SELECT * FROM messages "
         f"WHERE parent.id = '{message_id}' "
+        f"{LANGUAGE_FILTER} "
         f"ORDER BY post_time ASC "
         f"LIMIT {min(limit, 25)}"
     )
