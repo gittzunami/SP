@@ -23,13 +23,6 @@ class Settings:
     })
     AUTH_SKIP_PREFIX: tuple = ("/webhook/", "/api/webhook/")
 
-    # ── Database ──────────────────────────────────────────────────────────────
-    DB_HOST: str     = os.environ.get("DB_HOST", "")
-    DB_PORT: int     = int(os.environ.get("DB_PORT", "5432"))
-    DB_NAME: str     = os.environ.get("DB_NAME", "")
-    DB_USER: str     = os.environ.get("DB_USER", "")
-    DB_PASSWORD: str = os.environ.get("DB_PASSWORD", "")
-
     # ── Budget ────────────────────────────────────────────────────────────────
     DEFAULT_MONTHLY_BUDGET_USD: float = float(os.environ.get("DEFAULT_MONTHLY_BUDGET_USD", "1000"))
     EMAIL_ALERT_THRESHOLD_PCT: int    = int(os.environ.get("EMAIL_ALERT_THRESHOLD_PCT", "77"))

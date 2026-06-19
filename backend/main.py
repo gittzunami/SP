@@ -11,7 +11,6 @@ This file is a slim shim so existing uvicorn commands keep working.
 
 from __future__ import annotations
 
-import os
 from dotenv import load_dotenv
 load_dotenv()
 

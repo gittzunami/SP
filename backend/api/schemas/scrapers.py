@@ -8,7 +8,7 @@ Moved here from models.py (which is now a backward-compat shim).
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 # ── Schedule ──────────────────────────────────────────────────────────────────
@@ -24,8 +24,6 @@ SCHEDULE_SECONDS: Dict[str, int] = {
 
 # ── API keys (all from environment) ──────────────────────────────────────────
 APIFY_API_TOKEN     = os.environ.get("APIFY_API_TOKEN",    "")
-GETXAPI_KEY         = os.environ.get("GETXAPI_KEY",         "")
-SCRAPPA_API_KEY     = os.environ.get("SCRAPPA_API_KEY",     "")
 _SCRAPECREATORS_KEY = os.environ.get("SCRAPECREATORS_KEY", "")
 _SCRAPINGBEE_KEY    = os.environ.get("SCRAPINGBEE_KEY",    "")
 _STACKAPPS_KEY      = os.environ.get("STACKAPPS_KEY",      "")

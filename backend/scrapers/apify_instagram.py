@@ -18,10 +18,10 @@ from datetime import datetime, timezone
 from typing import List
 
 from apify_client import ApifyClient
-from models import APIFY_API_TOKEN
 
-logger   = logging.getLogger("scraper.instagram")
-ACTOR_ID = os.environ.get("APIFY_ACTOR_INSTAGRAM", "apify~instagram-scraper")
+logger    = logging.getLogger("scraper.instagram")
+_API_TOKEN = os.environ.get("APIFY_API_TOKEN", "")
+ACTOR_ID   = os.environ.get("APIFY_ACTOR_INSTAGRAM", "apify~instagram-scraper")
 
 
 def run_instagram(keywords: List[str], results_limit: int = 20,
