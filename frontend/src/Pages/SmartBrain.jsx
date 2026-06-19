@@ -30,7 +30,7 @@ import SearchIcon            from "@mui/icons-material/Search";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
 import { useAppTheme }       from "../AppThemeContext";
 
-const API_BASE       = "http://localhost:8000";
+const API_BASE       = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const SB_PROMPT_KEY  = "sbPrompt";
 const SB_RESULT_KEY  = "sbLastResult";   // set to "1" by FeedToSmartBrainModal as a redirect signal
 const SIDEBAR_KEY    = "sbSidebarOpen";
@@ -40,7 +40,7 @@ const PROVIDER_COLORS = { openai: "#10a37f", anthropic: "#d97757", gemini: "#428
 const PROVIDER_LABELS = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Gemini" };
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
-const API_BASE_SB = "http://localhost:8000";
+const API_BASE_SB = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 async function fetchHistoryFromDB() {
   try {

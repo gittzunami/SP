@@ -10,7 +10,7 @@ import CheckCircleIcon       from "@mui/icons-material/CheckCircle";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import { useAuth }           from "../AuthContext";
 
-const API = "http://localhost:8000";
+const API = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 // Password requirements
 const RULES = [

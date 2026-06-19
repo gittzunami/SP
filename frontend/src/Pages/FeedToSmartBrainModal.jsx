@@ -12,7 +12,7 @@ import { useAppTheme } from "../AppThemeContext";
 import { useNavigate } from "react-router-dom";
 import { useNotifications } from "../NotificationContext";
 
-const API_BASE      = "http://localhost:8000";
+const API_BASE      = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const SB_PROMPT_KEY = "sbPrompt";
 const SB_RESULT_KEY = "sbLastResult";
 

@@ -9,7 +9,7 @@ import CloseIcon       from "@mui/icons-material/Close";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import { useAppTheme } from "../AppThemeContext";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 const PLATFORM_META = {
   reddit:        { label: "Reddit",          color: "#ff4500" },

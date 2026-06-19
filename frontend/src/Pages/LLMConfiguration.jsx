@@ -15,7 +15,7 @@ import SmartToyIcon     from "@mui/icons-material/SmartToy";
 import { useAppTheme }      from "../AppThemeContext";
 import { useNotifications } from "../NotificationContext";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 const PROVIDER_MODELS = {
   openai: [
