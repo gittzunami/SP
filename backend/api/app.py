@@ -72,6 +72,23 @@ async def lifespan(app: FastAPI):
                 if row.scraper in state.scraper_status and row.scraped_at:
                     state.scraper_status[row.scraper]["last_run"]         = row.scraped_at.isoformat()
                     state.scraper_status[row.scraper]["last_total_items"] = row.total_items or 0
+
+            # Restore last_newsletters_created for Google News from most recent completed job
+            try:
+                from db_models import NewsletterJob, GeneratedNewsletter
+                last_job = (
+                    db.query(NewsletterJob)
+                    .filter(NewsletterJob.status == "completed")
+                    .order_by(NewsletterJob.created_at.desc())
+                    .first()
+                )
+                if last_job:
+                    nl_count = db.query(GeneratedNewsletter).filter_by(job_id=last_job.job_id).count()
+                    state.scraper_status["google_news"]["last_newsletters_created"] = nl_count
+                    logger.info("Restored google_news last_newsletters_created=%d (job %s)", nl_count, last_job.job_id[:8])
+            except Exception as exc:
+                logger.warning("Could not restore last_newsletters_created: %s", exc)
+
             db.close()
             logger.info("Restored scraper_status from DB (%d scrapers)", len(rows))
         except Exception as exc:

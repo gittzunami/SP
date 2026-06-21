@@ -260,11 +260,11 @@ const Scraping = () => {
               next[key] = { ...next[key], lastRun: new Date(s.last_run).toLocaleString() };
             }
 
-            // Always restore totalItems from backend (authoritative source)
-            if (s.last_total_items != null && next[key].totalItems == null) {
+            // Always restore totalItems/itemsProcessed from backend (authoritative source)
+            if (s.last_total_items != null) {
               next[key] = { ...next[key], totalItems: s.last_total_items };
             }
-            if (s.last_newsletters_created != null && next[key].itemsProcessed == null) {
+            if (s.last_newsletters_created != null) {
               next[key] = { ...next[key], itemsProcessed: s.last_newsletters_created };
             }
           }

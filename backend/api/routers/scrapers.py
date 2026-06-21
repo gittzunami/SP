@@ -221,10 +221,7 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
             from services.db_writer import save
             try:
                 actual_saved = save(scraper, spend_db, result, task_id, since_date=since_date)
-                for _key in ("total_posts", "total_questions", "total_tweets", "total_articles", "total_items"):
-                    if _key in result:
-                        result[_key] = actual_saved
-                        break
+                result["items_saved_to_db"] = actual_saved
                 logger.info("DB write complete for task %s (%s): %d saved (scraped: %s)",
                             task_id[:8], scraper, actual_saved, _scraped_counts)
             except Exception as exc:
@@ -313,9 +310,9 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
         if not keyword and hasattr(cfg, "keywords"):
             keyword = (getattr(cfg, "keywords", None) or [""])[0]
         items = (
-            result.get("total_posts") or result.get("total_tweets") or
-            result.get("total_articles") or result.get("total_questions") or
-            result.get("total_items") or 0
+            _scraped_counts.get("total_posts") or _scraped_counts.get("total_tweets") or
+            _scraped_counts.get("total_articles") or _scraped_counts.get("total_questions") or
+            _scraped_counts.get("total_items") or 0
         )
         state.task_registry[task_id].update({
             "status":      "completed",
