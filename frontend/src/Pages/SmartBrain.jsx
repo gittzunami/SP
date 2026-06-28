@@ -186,6 +186,741 @@ function parseInline(text) {
   });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  Stat summary cards — shared helpers
+// ══════════════════════════════════════════════════════════════════════════════
+
+function parseSbSummaryStats(text, recordCount) {
+  const lines = (text || "").split("\n");
+  const kv = {};
+  let inKM = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^##\s+key\s+metrics?$/i.test(t)) { inKM = true; continue; }
+    if (t.startsWith("## ") && inKM) break;
+    if (inKM) {
+      const m = t.match(/^\*\*([^*]+)\*\*:\s*(.+)$/);
+      if (m) kv[m[1].trim().toLowerCase()] = m[2].trim();
+    }
+  }
+  let pos = parseInt(kv["positive sentiment"] || kv["positive"] || "") || null;
+  let neg = parseInt(kv["negative sentiment"] || kv["negative"] || "") || null;
+  if (!pos && !neg) {
+    const sm = (text || "").match(/\*\*sentiment\*\*:\s*(\w+)/i);
+    if (sm) {
+      const sv = sm[1].toLowerCase();
+      if (/positive|bullish|good|great|strong/.test(sv)) { pos = 65; neg = 35; }
+      else if (/negative|bearish|bad|poor|weak/.test(sv)) { pos = 30; neg = 70; }
+      else { pos = 50; neg = 50; }
+    }
+  }
+  return {
+    recordCount: recordCount || 0,
+    pos, neg, hasSentiment: pos !== null || neg !== null,
+    keyFindings: parseInt(kv["key findings"] || kv["findings"] || kv["insights"]) || null,
+    keyTopics: parseInt(kv["key topics"] || kv["topics"] || kv["themes"]) || null,
+    risks: parseInt(kv["risks"] || kv["risks identified"]) || null,
+    opportunities: parseInt(kv["opportunities"] || kv["opportunities found"]) || null,
+  };
+}
+
+function SbSentimentBar({ pos, neg, isDark, showLabels = true }) {
+  const posP = pos !== null ? Math.min(100, Math.max(0, pos)) : 50;
+  const negP = neg !== null ? Math.min(100, Math.max(0, neg)) : 50;
+  const hasData = pos !== null;
+  const overallLabel = !hasData ? "No data" : posP > negP ? "Positive overall" : posP < negP ? "Negative overall" : "Balanced";
+  const overallColor = !hasData ? "#9ca3af" : posP > negP ? "#10b981" : posP < negP ? "#ef4444" : "#f59e0b";
+  return (
+    <Box>
+      <Box sx={{ position: "relative", height: 7, borderRadius: 4, overflow: "hidden", bgcolor: isDark ? "#1f2937" : "#e5e7eb", mb: showLabels ? 0.75 : 0 }}>
+        <Box sx={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${posP}%`, bgcolor: "#10b981", borderRadius: "4px 0 0 4px", transition: "width 0.8s cubic-bezier(0.34,1.56,0.64,1)" }} />
+        <Box sx={{ position: "absolute", right: 0, top: 0, bottom: 0, width: `${negP}%`, bgcolor: "#ef4444", borderRadius: "0 4px 4px 0", transition: "width 0.8s cubic-bezier(0.34,1.56,0.64,1)" }} />
+      </Box>
+      {showLabels && (
+        <>
+          <Typography sx={{ fontSize: "0.7rem", fontWeight: 700, color: overallColor, mb: 0.3, lineHeight: 1 }}>{overallLabel}</Typography>
+          <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+            <Typography sx={{ fontSize: "0.61rem", color: "#10b981", fontWeight: 600, lineHeight: 1 }}>+{posP}%</Typography>
+            <Typography sx={{ fontSize: "0.61rem", color: "#ef4444", fontWeight: 600, lineHeight: 1 }}>-{negP}%</Typography>
+          </Box>
+        </>
+      )}
+    </Box>
+  );
+}
+
+function SbKpiCard({ title, accent, C, isDark, children }) {
+  return (
+    <Box sx={{
+      flex: 1, minWidth: 0,
+      borderRadius: "11px", border: `1px solid ${accent}28`,
+      bgcolor: isDark ? `${accent}0c` : `${accent}06`,
+      overflow: "hidden", position: "relative",
+      transition: "transform 0.15s ease, box-shadow 0.18s ease",
+      "&:hover": { transform: "translateY(-2px)", boxShadow: `0 8px 24px ${accent}22, 0 0 0 1px ${accent}40`, borderColor: `${accent}44` },
+    }}>
+      <Box sx={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, bgcolor: accent, boxShadow: `2px 0 8px ${accent}55` }} />
+      <Box sx={{ pl: 1.75, pr: 1.5, pt: 1.25, pb: 1.25 }}>
+        <Typography sx={{ fontSize: "0.54rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.9, color: accent, mb: 0.75, lineHeight: 1, display: "block" }}>
+          {title}
+        </Typography>
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+// Smart Brain: up to 6 KPI cards
+function SbStatCardsRow({ text, recordCount, C, isDark }) {
+  const s = parseSbSummaryStats(text, recordCount);
+  return (
+    <Box sx={{ display: "flex", gap: 1.25, overflowX: "auto", pb: 0.5, mb: 2.25,
+      "&::-webkit-scrollbar": { height: 4 },
+      "&::-webkit-scrollbar-thumb": { bgcolor: isDark ? "#374151" : "#d1d5db", borderRadius: 4 },
+    }}>
+      <SbKpiCard title="Records Analyzed" accent="#3b82f6" C={C} isDark={isDark}>
+        <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#3b82f6", lineHeight: 1, mb: 0.25 }}>{s.recordCount}</Typography>
+        <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Input data</Typography>
+      </SbKpiCard>
+
+      <SbKpiCard title="Sentiment" accent="#f59e0b" C={C} isDark={isDark}>
+        <SbSentimentBar pos={s.pos} neg={s.neg} isDark={isDark} showLabels={s.hasSentiment} />
+        {!s.hasSentiment && <Typography sx={{ fontSize: "0.62rem", color: "#f59e0b", fontWeight: 600, mt: 0.5, lineHeight: 1 }}>Needs attention</Typography>}
+      </SbKpiCard>
+
+      {s.keyFindings !== null && (
+        <SbKpiCard title="Key Findings" accent="#7c3aed" C={C} isDark={isDark}>
+          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#7c3aed", lineHeight: 1, mb: 0.25 }}>{s.keyFindings}</Typography>
+          <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Insights</Typography>
+        </SbKpiCard>
+      )}
+
+      {s.keyTopics !== null && (
+        <SbKpiCard title="Key Topics" accent="#06b6d4" C={C} isDark={isDark}>
+          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#06b6d4", lineHeight: 1, mb: 0.25 }}>{s.keyTopics}</Typography>
+          <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Identified</Typography>
+        </SbKpiCard>
+      )}
+
+      {s.opportunities !== null && (
+        <SbKpiCard title="Opportunities" accent="#10b981" C={C} isDark={isDark}>
+          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#10b981", lineHeight: 1, mb: 0.25 }}>{s.opportunities}</Typography>
+          <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Identified</Typography>
+        </SbKpiCard>
+      )}
+
+      {s.risks !== null && (
+        <SbKpiCard title="Risks" accent="#ef4444" C={C} isDark={isDark}>
+          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#ef4444", lineHeight: 1, mb: 0.25 }}>{s.risks}</Typography>
+          <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Flagged</Typography>
+        </SbKpiCard>
+      )}
+    </Box>
+  );
+}
+
+const SB_TOPIC_CHIP_COLORS = ["#3b82f6","#7c3aed","#10b981","#f59e0b","#06b6d4","#ec4899","#a78bfa","#059669","#c2410c","#4338ca"];
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Smart Brain Grid Renderer — vivid cards, varied layout, strategy indicators
+// ══════════════════════════════════════════════════════════════════════════════
+
+const SB_PALETTE = [
+  "#7c3aed", "#2563eb", "#059669", "#dc2626",
+  "#b45309", "#0e7490", "#9d174d", "#4338ca",
+  "#0f766e", "#c2410c",
+];
+
+// Span pattern (out of 12 grid columns). Rows sum to 12:
+//   7+5, 5+7, 4+4+4, 8+4, 6+6, 12, then repeat
+const SB_SPAN_PATTERN = [7, 5, 5, 7, 4, 4, 4, 8, 4, 6, 6, 12];
+function getSbSpan(idx) {
+  if (idx === 0) return 12;
+  return SB_SPAN_PATTERN[(idx - 1) % SB_SPAN_PATTERN.length];
+}
+
+function sbMetricColor(value) {
+  const v = (value || "").toLowerCase().trim();
+  if (/^(positive|true|yes|high|strong|growing|bullish|rising|confirmed|good|excellent|great|favorable|upward|increasing|above average)/.test(v)) return "#10b981";
+  if (/^(negative|false|no|low|weak|declining|bearish|falling|unconfirmed|bad|poor|unfavorable|downward|decreasing|below average)/.test(v)) return "#ef4444";
+  if (/^(neutral|mixed|moderate|medium|average|stable|balanced|inconclusive|unclear|uncertain)/.test(v)) return "#f59e0b";
+  if (/\d+%/.test(v)) return "#8b5cf6";
+  if (/^\d+[\/.]\d+/.test(v)) return "#3b82f6";
+  return null;
+}
+
+function getBinaryInfo(value) {
+  const PAIRS = {
+    positive:  [["Positive", "Negative"], true],
+    negative:  [["Positive", "Negative"], false],
+    true:      [["True",     "False"   ], true],
+    false:     [["True",     "False"   ], false],
+    yes:       [["Yes",      "No"      ], true],
+    no:        [["Yes",      "No"      ], false],
+    high:      [["High",     "Low"     ], true],
+    low:       [["High",     "Low"     ], false],
+    bullish:   [["Bullish",  "Bearish" ], true],
+    bearish:   [["Bullish",  "Bearish" ], false],
+    rising:    [["Rising",   "Falling" ], true],
+    falling:   [["Rising",   "Falling" ], false],
+    strong:    [["Strong",   "Weak"    ], true],
+    weak:      [["Strong",   "Weak"    ], false],
+    growing:   [["Growing",  "Declining"], true],
+    declining: [["Growing",  "Declining"], false],
+    confirmed: [["Confirmed","Unconfirmed"], true],
+    unconfirmed:[["Confirmed","Unconfirmed"], false],
+  };
+  const first = (value || "").toLowerCase().trim().split(/\s+/)[0];
+  if (!PAIRS[first]) return null;
+  const [pair, isPositive] = PAIRS[first];
+  return { pair, isPositive };
+}
+
+// Single metric indicator — split toggle pill for binary values, color chip otherwise
+function SbMetricChip({ label, value, isDark }) {
+  const binary  = getBinaryInfo(value);
+  const mColor  = sbMetricColor(value) || "#a78bfa";
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, minWidth: 86 }}>
+      <Typography sx={{
+        fontSize: "0.56rem", fontWeight: 700, textTransform: "uppercase",
+        letterSpacing: 1, lineHeight: 1,
+        color: isDark ? "#9ca3af" : "#6b7280",
+      }}>
+        {label}
+      </Typography>
+
+      {binary ? (
+        <Box sx={{
+          display: "flex", borderRadius: "16px", overflow: "hidden", height: 28,
+          border: `1px solid ${isDark ? "#374151" : "#e5e7eb"}`,
+        }}>
+          {/* Left side */}
+          <Box sx={{
+            flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: "0.68rem", fontWeight: 700,
+            bgcolor: binary.isPositive ? "#10b981cc" : isDark ? "#10b98118" : "#10b98110",
+            color: binary.isPositive ? "#fff" : isDark ? "#10b98155" : "#10b98144",
+            transition: "background 0.2s",
+            borderRight: `1px solid ${isDark ? "#374151" : "#e5e7eb"}`,
+          }}>
+            {binary.pair[0]}
+          </Box>
+          {/* Right side */}
+          <Box sx={{
+            flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: "0.68rem", fontWeight: 700,
+            bgcolor: !binary.isPositive ? "#ef4444cc" : isDark ? "#ef444418" : "#ef444410",
+            color: !binary.isPositive ? "#fff" : isDark ? "#ef444455" : "#ef444444",
+            transition: "background 0.2s",
+          }}>
+            {binary.pair[1]}
+          </Box>
+        </Box>
+      ) : (
+        <Box sx={{
+          px: 1.25, height: 28, display: "flex", alignItems: "center",
+          borderRadius: "16px", fontSize: "0.75rem", fontWeight: 800, whiteSpace: "nowrap",
+          bgcolor: isDark ? `${mColor}20` : `${mColor}12`,
+          border: `1px solid ${mColor}50`,
+          color: mColor,
+        }}>
+          {value}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+// Scan all sections for **Label**: Value lines — return top 8 unique metrics
+function extractSbMetrics(sections) {
+  const seen = new Set();
+  const out  = [];
+  for (const sec of sections) {
+    for (const line of sec.lines) {
+      const m = line.trim().match(/^\*\*([^*]+)\*\*:\s*(.+)$/);
+      if (m && !seen.has(m[1].trim().toLowerCase())) {
+        seen.add(m[1].trim().toLowerCase());
+        out.push({ label: m[1].trim(), value: m[2].trim() });
+        if (out.length >= 8) return out;
+      }
+    }
+  }
+  return out;
+}
+
+// Same section-splitting logic as Trends
+function parseSbSections(text) {
+  if (!text) return { pageTitle: null, sections: [] };
+  const lines = text.split("\n");
+  let pageTitle = null;
+  const sections = [];
+  let cur = null;
+  for (const line of lines) {
+    const trim = line.trim();
+    if (trim.startsWith("# ")) { if (!pageTitle) pageTitle = trim.slice(2); continue; }
+    if (trim.startsWith("## ")) {
+      if (cur && (cur.title || cur.lines.some(l => l.trim()))) sections.push(cur);
+      cur = { title: trim.slice(3), lines: [], sub: [] };
+      continue;
+    }
+    if (trim.startsWith("### ")) {
+      if (cur) {
+        cur.sub.push({ title: trim.slice(4), lines: [] });
+      }
+      continue;
+    }
+    if (!cur) cur = { title: null, lines: [], sub: [] };
+    if (cur.sub.length > 0) {
+      cur.sub[cur.sub.length - 1].lines.push(line);
+    } else {
+      cur.lines.push(line);
+    }
+  }
+  if (cur && (cur.title || cur.lines.some(l => l.trim()))) sections.push(cur);
+  return { pageTitle, sections };
+}
+
+// Section body renderer with SbMetricChip support
+function SbSectionContent({ lines, C, isDark, accent }) {
+  const blocks = [];
+  let key = 0, i = 0;
+
+  while (i < lines.length) {
+    const trim = lines[i].trim();
+    if (!trim) { i++; continue; }
+
+    if (trim.startsWith("### ")) {
+      blocks.push(
+        <Box key={key++} sx={{ display: "flex", alignItems: "center", gap: 1, mt: blocks.length ? 1.75 : 0, mb: 0.6 }}>
+          <Box sx={{ width: 3, height: 13, borderRadius: 4, bgcolor: accent, flexShrink: 0, opacity: 0.7 }} />
+          <Typography sx={{ fontWeight: 700, fontSize: "0.84rem", color: C.text, letterSpacing: 0.1 }}>
+            {parseInline(trim.slice(4))}
+          </Typography>
+        </Box>
+      );
+      i++; continue;
+    }
+
+    if (trim.startsWith("#### ")) {
+      blocks.push(
+        <Typography key={key++} sx={{
+          fontWeight: 600, fontSize: "0.69rem", color: accent,
+          textTransform: "uppercase", letterSpacing: 1, mt: 1.2, mb: 0.4,
+        }}>
+          {parseInline(trim.slice(5))}
+        </Typography>
+      );
+      i++; continue;
+    }
+
+    if (trim.startsWith("- ") || trim.startsWith("* ")) {
+      const items = [];
+      while (i < lines.length) {
+        const t = lines[i].trim();
+        if (t.startsWith("- ") || t.startsWith("* ")) { items.push(t.slice(2)); i++; }
+        else if (!t) { i++; break; } else break;
+      }
+      blocks.push(
+        <Box key={key++} sx={{ mt: 0.5, mb: 0.75 }}>
+          {items.map((item, j) => (
+            <Box key={j} sx={{ display: "flex", alignItems: "flex-start", gap: 1.25, mb: 0.55 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: accent, mt: "7px", flexShrink: 0, boxShadow: `0 0 0 2px ${accent}22, 0 0 5px ${accent}40` }} />
+              <Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.75, fontSize: "0.85rem" }}>
+                {parseInline(item)}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      );
+      continue;
+    }
+
+    if (/^\d+\.\s/.test(trim)) {
+      const items = [];
+      while (i < lines.length) {
+        const t = lines[i].trim();
+        if (/^\d+\.\s/.test(t)) { items.push(t.replace(/^\d+\.\s/, "")); i++; }
+        else if (!t) { i++; break; } else break;
+      }
+      blocks.push(
+        <Box key={key++} sx={{ mt: 0.5, mb: 0.75 }}>
+          {items.map((item, j) => (
+            <Box key={j} sx={{ display: "flex", alignItems: "flex-start", gap: 1.25, mb: 0.7 }}>
+              <Box sx={{
+                minWidth: 22, height: 22, borderRadius: "50%",
+                bgcolor: `${accent}1e`, border: `1.5px solid ${accent}`,
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, mt: "1px",
+              }}>
+                <Typography sx={{ fontSize: "0.57rem", fontWeight: 800, color: accent, lineHeight: 1 }}>{j + 1}</Typography>
+              </Box>
+              <Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.75, fontSize: "0.85rem" }}>
+                {parseInline(item)}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      );
+      continue;
+    }
+
+    if (trim === "---" || trim === "***" || trim === "___") {
+      blocks.push(
+        <Box key={key++} sx={{ my: 1.5, height: "1px", background: `linear-gradient(90deg, ${accent}44 0%, ${accent}18 60%, transparent 100%)` }} />
+      );
+      i++; continue;
+    }
+
+    // Metric chips: **Label**: Value — binary split pill or color chip
+    if (/^\*\*[^*]+\*\*:\s*\S/.test(trim)) {
+      const metrics = [];
+      while (i < lines.length) {
+        const t = lines[i].trim();
+        if (/^\*\*[^*]+\*\*:\s*\S/.test(t)) {
+          const m = t.match(/^\*\*([^*]+)\*\*:\s*(.+)$/);
+          if (m) metrics.push({ label: m[1].trim(), value: m[2].trim() });
+          i++;
+        } else if (!t) { i++; break; } else break;
+      }
+      if (metrics.length) {
+        blocks.push(
+          <Box key={key++} sx={{ display: "flex", flexWrap: "wrap", gap: 1.25, mt: 0.75, mb: 1.25 }}>
+            {metrics.map((m, j) => (
+              <SbMetricChip key={j} label={m.label} value={m.value} isDark={isDark} />
+            ))}
+          </Box>
+        );
+      }
+      continue;
+    }
+
+    // Paragraph (break on metric lines)
+    const paraLines = [];
+    while (i < lines.length) {
+      const t = lines[i].trim();
+      if (!t) { i++; break; }
+      if (/^#{1,4}\s/.test(t) || t.startsWith("- ") || t.startsWith("* ") ||
+          /^\d+\.\s/.test(t) || t === "---" || t.startsWith("|") ||
+          /^\*\*[^*]+\*\*:\s*\S/.test(t)) break;
+      paraLines.push(t); i++;
+    }
+    if (paraLines.length)
+      blocks.push(
+        <Typography key={key++} variant="body2" sx={{ color: C.textSub, lineHeight: 1.8, mb: 0.5, fontSize: "0.875rem" }}>
+          {parseInline(paraLines.join(" "))}
+        </Typography>
+      );
+  }
+
+  return <>{blocks}</>;
+}
+
+// Individual grid card — collapsible, hover lift + glow
+function SbSectionCard({ sec, idx, C, isDark }) {
+  const [expanded, setExpanded] = useState(true);
+  const accent   = SB_PALETTE[idx % SB_PALETTE.length];
+  const isTopics = /key\s*topics?|main\s*topics?|topics?\s+identified|themes?|categories?/i.test(sec.title || "");
+  const mdSpan   = isTopics ? 12 : getSbSpan(idx);
+  const smFull   = mdSpan > 6;
+  const isHero   = idx === 0;
+
+  const topicNames = isTopics
+    ? sec.lines.map(l => { const m = l.trim().match(/^[-*]\s+(.+)$/) || l.trim().match(/^\d+\.\s+(.+)$/); return m ? m[1].replace(/\*\*/g, "").trim() : null; }).filter(Boolean)
+    : [];
+
+  return (
+    <Box sx={{
+      gridColumn: { xs: "1 / -1", sm: smFull ? "1 / -1" : "auto", md: `span ${mdSpan}` },
+      borderRadius: "14px",
+      border: `1.5px solid ${accent}30`,
+      bgcolor: isDark ? `${accent}0b` : `${accent}05`,
+      overflow: "hidden",
+      transition: "transform 0.18s ease, box-shadow 0.22s ease, border-color 0.22s ease",
+      "&:hover": {
+        transform: "translateY(-2px)",
+        boxShadow: `0 8px 30px ${accent}22, 0 0 0 1px ${accent}50`,
+        borderColor: `${accent}55`,
+      },
+    }}>
+      {/* Card header — click to collapse */}
+      {sec.title && (
+        <Box
+          onClick={() => setExpanded(v => !v)}
+          sx={{
+            px: isHero ? 2.5 : 2, py: isHero ? 1.5 : 1.1,
+            cursor: "pointer", userSelect: "none",
+            background: isDark
+              ? `linear-gradient(125deg, ${accent}28 0%, ${accent}10 100%)`
+              : `linear-gradient(125deg, ${accent}18 0%, ${accent}08 100%)`,
+            borderBottom: expanded ? `1px solid ${accent}25` : "none",
+            display: "flex", alignItems: "center", gap: 1.5,
+          }}
+        >
+          {/* Left accent bar */}
+          <Box sx={{
+            width: isHero ? 5 : 4, height: isHero ? 26 : 20,
+            borderRadius: 4, flexShrink: 0, bgcolor: accent,
+            boxShadow: `0 0 12px ${accent}75`,
+          }} />
+          <Typography sx={{
+            fontWeight: 800, fontSize: isHero ? "0.98rem" : "0.87rem",
+            color: isDark ? `${accent}f0` : accent,
+            letterSpacing: 0.15, lineHeight: 1.3, flex: 1,
+          }}>
+            {parseInline(sec.title)}
+          </Typography>
+          {/* Status dots */}
+          <Box sx={{ display: "flex", gap: 0.5, alignItems: "center", flexShrink: 0 }}>
+            <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: accent, opacity: 0.85, boxShadow: `0 0 5px ${accent}` }} />
+            <Box sx={{ width: 4, height: 4, borderRadius: "50%", bgcolor: accent, opacity: 0.4 }} />
+          </Box>
+          {/* Collapse chevron */}
+          <Box sx={{
+            color: `${accent}90`, display: "flex", alignItems: "center", flexShrink: 0,
+            transition: "transform 0.2s ease",
+            transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
+          }}>
+            <ExpandMoreIcon sx={{ fontSize: 15 }} />
+          </Box>
+        </Box>
+      )}
+
+      {/* Card body — topics section gets chip rendering */}
+      <Collapse in={expanded}>
+        <Box sx={{ px: isHero ? 2.5 : 2, py: isHero ? 2 : 1.5 }}>
+          {isTopics && topicNames.length > 0 ? (
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.85 }}>
+              {topicNames.map((topic, j) => {
+                const tc = SB_TOPIC_CHIP_COLORS[j % SB_TOPIC_CHIP_COLORS.length];
+                return (
+                  <Box key={j} sx={{
+                    px: 1.5, py: 0.65, borderRadius: "20px",
+                    border: `1.5px solid ${tc}42`,
+                    bgcolor: isDark ? `${tc}1a` : `${tc}0f`,
+                    color: tc, fontSize: "0.8rem", fontWeight: 600,
+                    cursor: "default",
+                    transition: "transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease",
+                    "&:hover": { transform: "scale(1.05)", boxShadow: `0 0 12px ${tc}32`, bgcolor: isDark ? `${tc}28` : `${tc}18` },
+                  }}>
+                    {topic}
+                  </Box>
+                );
+              })}
+            </Box>
+          ) : (
+            <SbSectionContent lines={sec.lines} C={C} isDark={isDark} accent={accent} />
+          )}
+        </Box>
+      </Collapse>
+    </Box>
+  );
+}
+
+// Horizontal bar showing the top extracted metrics at a glance
+function SbInsightsBar({ sections, isDark }) {
+  const metrics = extractSbMetrics(sections);
+  if (!metrics.length) return null;
+  return (
+    <Box sx={{
+      display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1.5,
+      px: 2, py: 1.5, mb: 2,
+      borderRadius: "12px",
+      bgcolor: isDark ? "#1a1730" : "#f5f3ff",
+      border: `1px solid ${isDark ? "#4c1d9540" : "#ddd6fe66"}`,
+    }}>
+      <Typography sx={{
+        fontSize: "0.57rem", fontWeight: 800, textTransform: "uppercase",
+        letterSpacing: 1.2, color: isDark ? "#a78bfa88" : "#7c3aed77",
+        pr: 1.5, mr: 0.5, alignSelf: "center", lineHeight: 1,
+        borderRight: `1px solid ${isDark ? "#4c1d9555" : "#ddd6fe"}`,
+        whiteSpace: "nowrap",
+      }}>
+        Key Insights
+      </Typography>
+      {metrics.map((m, j) => (
+        <SbMetricChip key={j} label={m.label} value={m.value} isDark={isDark} />
+      ))}
+    </Box>
+  );
+}
+
+// ── SWOT 2×2 grid ────────────────────────────────────────────────────────────
+const SWOT_CONFIG = [
+  { key: "strengths",    color: "#10b981", icon: "S", pattern: /^strengths?$/i },
+  { key: "weaknesses",   color: "#ef4444", icon: "W", pattern: /^weaknesses?$/i },
+  { key: "opportunities", color: "#3b82f6", icon: "O", pattern: /^opportunities?$/i },
+  { key: "threats",      color: "#f59e0b", icon: "T", pattern: /^threats?$/i },
+];
+
+function matchSwotSection(title) {
+  if (!title) return null;
+  for (const cfg of SWOT_CONFIG) {
+    if (cfg.pattern.test(title.trim())) return cfg;
+  }
+  return null;
+}
+
+function isSwotAnalysis(sections) {
+  // Case 1: ## Strengths, ## Weaknesses, etc. (top-level sections)
+  if (sections.filter(s => matchSwotSection(s.title)).length >= 3) return true;
+  // Case 2: ## SWOT Analysis with ### Strengths, ### Weaknesses, etc. inside
+  for (const sec of sections) {
+    if (sec.sub && sec.sub.length >= 3) {
+      const swotCount = sec.sub.filter(s => matchSwotSection(s.title)).length;
+      if (swotCount >= 3) return true;
+    }
+  }
+  return false;
+}
+
+function normalizeBullets(lines) {
+  return lines.map(l => l.replace(/^(\s*)\d+\.\s/, "$1- "));
+}
+
+function extractSwotSections(sections) {
+  // Case 1: top-level SWOT sections
+  const topLevel = sections.map(sec => ({
+    sec: { ...sec, lines: normalizeBullets(sec.lines) },
+    cfg: matchSwotSection(sec.title),
+  })).filter(m => m.cfg);
+  if (topLevel.length >= 3) return topLevel;
+
+  // Case 2: subsections inside a parent (e.g. ## SWOT Analysis → ### Strengths)
+  for (const sec of sections) {
+    if (!sec.sub || sec.sub.length < 2) continue;
+    const matched = sec.sub
+      .map(sub => ({
+        sec: { title: sub.title, lines: normalizeBullets(sub.lines), sub: [] },
+        cfg: matchSwotSection(sub.title),
+      }))
+      .filter(m => m.cfg);
+    if (matched.length >= 2) return matched;
+  }
+  return [];
+}
+
+function SbSwotGrid({ sections, C, isDark }) {
+  const matched = extractSwotSections(sections);
+  if (matched.length < 2) return null;
+
+  return (
+    <Box sx={{
+      display: "grid",
+      gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)" },
+      gap: 1.75,
+    }}>
+      {matched.map(({ sec, cfg }) => {
+        const accent = cfg.color;
+        return (
+          <Box key={cfg.key} sx={{
+            borderRadius: "14px",
+            border: `1.5px solid ${accent}30`,
+            bgcolor: isDark ? `${accent}0b` : `${accent}05`,
+            overflow: "hidden",
+            transition: "transform 0.18s ease, box-shadow 0.22s ease",
+            "&:hover": {
+              transform: "translateY(-2px)",
+              boxShadow: `0 8px 30px ${accent}22, 0 0 0 1px ${accent}50`,
+            },
+          }}>
+            <Box sx={{
+              px: 2, py: 1.25,
+              background: isDark
+                ? `linear-gradient(125deg, ${accent}28 0%, ${accent}10 100%)`
+                : `linear-gradient(125deg, ${accent}18 0%, ${accent}08 100%)`,
+              borderBottom: `1px solid ${accent}25`,
+              display: "flex", alignItems: "center", gap: 1.5,
+            }}>
+              <Box sx={{
+                width: 4, height: 20, borderRadius: 4, flexShrink: 0, bgcolor: accent,
+                boxShadow: `0 0 12px ${accent}75`,
+              }} />
+              <Typography sx={{
+                fontWeight: 800, fontSize: "0.95rem",
+                color: isDark ? `${accent}f0` : accent,
+                letterSpacing: 0.15, lineHeight: 1.3, flex: 1,
+              }}>
+                {cfg.icon} — {sec.title}
+              </Typography>
+              <Box sx={{ display: "flex", gap: 0.5, alignItems: "center", flexShrink: 0 }}>
+                <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: accent, opacity: 0.85, boxShadow: `0 0 5px ${accent}` }} />
+              </Box>
+            </Box>
+            <Box sx={{ px: 2, py: 1.5 }}>
+              <SbSectionContent lines={sec.lines} C={C} isDark={isDark} accent={accent} />
+            </Box>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
+// Grid-based AI response renderer
+function SbMarkdownRenderer({ text, C, isDark }) {
+  if (!text) return null;
+  const { pageTitle, sections } = parseSbSections(text);
+  // Strip Key Metrics — it powers the stat cards row above
+  const display = sections
+    .map((sec, i) => ({ sec, i }))
+    .filter(({ sec }) => !/^key\s+metrics?$/i.test(sec.title || ""));
+  if (!display.length) return null;
+
+  const swotMode = isSwotAnalysis(sections);
+  const swotParentTitles = swotMode
+    ? sections.filter(s => s.sub?.some(sub => matchSwotSection(sub.title))).map(s => (s.title || "").toLowerCase())
+    : [];
+  const remaining = display.filter(({ sec }) => {
+    const t = (sec.title || "").toLowerCase();
+    if (matchSwotSection(sec.title)) return false;
+    if (swotParentTitles.includes(t)) return false;
+    return true;
+  });
+  const isKeyTopics = (s) => /^key\s*topics?$/i.test(s?.title || "");
+  const beforeSwot = remaining.filter(({ sec }) => isKeyTopics(sec));
+  const afterSwot  = remaining.filter(({ sec }) => !isKeyTopics(sec));
+
+  return (
+    <Box>
+      {pageTitle && (
+        <Typography sx={{ fontWeight: 800, fontSize: { xs: "1.1rem", md: "1.3rem" }, color: C.text, mb: 1.5, lineHeight: 1.3 }}>
+          {parseInline(pageTitle)}
+        </Typography>
+      )}
+      {!swotMode && (
+        <>
+          <SbInsightsBar sections={sections} isDark={isDark} />
+          <Box sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(12, 1fr)" },
+            gap: 1.75,
+          }}>
+            {display.map(({ sec, i }) => (
+              <SbSectionCard key={i} sec={sec} idx={i} C={C} isDark={isDark} />
+            ))}
+          </Box>
+        </>
+      )}
+      {swotMode && beforeSwot.length > 0 && (
+        <Box sx={{ mb: 1.75 }}>
+          {beforeSwot.map(({ sec, i }) => (
+            <SbSectionCard key={i} sec={sec} idx={i} C={C} isDark={isDark} />
+          ))}
+        </Box>
+      )}
+      {swotMode && <SbSwotGrid sections={sections} C={C} isDark={isDark} />}
+      {swotMode && afterSwot.length > 0 && (
+        <Box sx={{ mt: 1.75 }}>
+          {afterSwot.map(({ sec, i }) => (
+            <SbSectionCard key={i} sec={sec} idx={i} C={C} isDark={isDark} />
+          ))}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 // ── Block markdown renderer ───────────────────────────────────────────────────
 function MarkdownRenderer({ text, C }) {
   if (!text) return null;
@@ -715,7 +1450,7 @@ export default function SmartBrain() {
               <Divider sx={{ bgcolor: C.border }} />
               <Box sx={{ px: 2.5, py: 2, bgcolor: C.cardInner }}>
                 <Typography variant="body2" sx={{ color: C.textSub, mb: 1.5, fontSize: "0.8rem" }}>
-                  Type a prompt or upload a .txt / .pdf / .docx file. It will auto-fill when you click
+                  Type a prompt or upload a .txt / .pdf / .docx / .mx file. It will auto-fill when you click
                   "Feed to Smart Brain" on the Results page.
                 </Typography>
 
@@ -729,7 +1464,7 @@ export default function SmartBrain() {
                       "&:hover": { borderColor: "#a78bfa", color: "#a78bfa" } }}>
                     {parsing ? "Parsing…" : "Upload File"}
                   </Button>
-                  <input ref={fileRef} type="file" accept=".txt,.pdf,.docx" hidden onChange={handleFileUpload} />
+                  <input ref={fileRef} type="file" accept=".txt,.pdf,.docx,.mx" hidden onChange={handleFileUpload} />
                 </Box>
 
                 {parseError && <Alert severity="error" sx={{ mb: 1.5, py: 0.5, fontSize: "0.78rem" }}>{parseError}</Alert>}
@@ -837,32 +1572,29 @@ export default function SmartBrain() {
                 </Collapse>
               </Box>
 
-              {/* Response card */}
-              <Box sx={{ bgcolor: C.card, borderRadius: 2, border: `1px solid ${C.border}`, overflow: "hidden" }}>
-                <Box sx={{ px: 3, py: 2, borderBottom: `1px solid ${C.border}`,
-                  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: provColor, flexShrink: 0 }} />
-                    <Typography sx={{ fontWeight: 700, color: C.text, fontSize: "0.95rem" }}>
-                      AI Response
-                    </Typography>
-                  </Box>
+              {/* AI response — grid card layout */}
+              <Box>
+                {/* Action row */}
+                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5, px: 0.25 }}>
+                  <Typography variant="caption" sx={{ color: C.textMuted, fontWeight: 700, letterSpacing: 0.8 }}>
+                    AI ANALYSIS
+                  </Typography>
                   <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
                     <IconButton size="small" onClick={handleCopy}
-                      sx={{ color: copied ? "#10b981" : C.textMuted,
-                        border: `1px solid ${C.border}`,
+                      sx={{ color: copied ? "#10b981" : C.textMuted, border: `1px solid ${C.border}`,
                         "&:hover": { color: "#10b981", borderColor: "#10b981" } }}>
-                      <ContentCopyIcon sx={{ fontSize: 15 }} />
+                      <ContentCopyIcon sx={{ fontSize: 14 }} />
                     </IconButton>
                   </Tooltip>
                 </Box>
 
-                <Box sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 2.5, md: 3.5 } }}>
-                  <MarkdownRenderer text={result.result} C={C} />
-                </Box>
+                {/* KPI stat cards row */}
+                <SbStatCardsRow text={result.result} recordCount={result.record_count} C={C} isDark={isDark} />
 
-                <Box sx={{ px: 3, py: 1.5, borderTop: `1px solid ${C.border}`,
-                  bgcolor: C.cardInner, display: "flex", justifyContent: "space-between",
+                <SbMarkdownRenderer text={result.result} C={C} isDark={isDark} />
+
+                {/* Footer */}
+                <Box sx={{ mt: 2.5, display: "flex", justifyContent: "space-between",
                   alignItems: "center", flexWrap: "wrap", gap: 1 }}>
                   <Typography variant="caption" sx={{ color: C.textMuted }}>
                     Generated by {provLabel || "AI"} · {dateLabel}

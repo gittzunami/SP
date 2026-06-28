@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi import Path as FPath
 from sqlalchemy.orm import Session
 
@@ -125,3 +125,95 @@ def delete_newsletter(newsletter_id: int = FPath(...), db: Session = Depends(get
     db.delete(nl)
     db.commit()
     return {"deleted": newsletter_id}
+
+
+# ── Auto-scrape Google News (unauthenticated, for MS Teams scheduler) ─────────
+
+def _run_auto_scrape(task_id: str, keywords: list[str]) -> None:
+    """Background task: scrape Google News for all keywords, then trigger webhook flow."""
+    import database as _db
+    from scrapers.scrappa_google_news import run_google_news
+
+    db = _db.SessionLocal() if _db.SessionLocal else None
+    try:
+        result = run_google_news(
+            keywords=keywords,
+            max_results=20,
+            task_id=task_id,
+            db=db,
+        )
+        logger.info(
+            "Auto-scrape completed for task %s — %d articles",
+            task_id[:8], result.get("total_articles", 0),
+        )
+    except Exception as exc:
+        logger.error("Auto-scrape failed for task %s: %s", task_id[:8], exc)
+    finally:
+        if db:
+            db.close()
+
+
+@router.post("/api/webhook/google-news/auto-scrape", tags=["Webhooks"])
+def auto_scrape_google_news(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Unauthenticated endpoint for MS Teams scheduler.
+    Scrapes Google News for all keywords assigned to google_news,
+    then triggers the normal webhook → approval → newsletter flow.
+    """
+    import uuid
+    from datetime import datetime, timezone
+    from db_models import ScraperKeywordSelection, ScraperKeyword, TaskHistory
+    import database
+
+    # Fetch all keywords assigned to google_news
+    selections = (
+        db.query(ScraperKeywordSelection)
+        .filter(ScraperKeywordSelection.scraper == "google_news")
+        .all()
+    )
+    if not selections:
+        raise HTTPException(400, "No keywords assigned to Google News")
+
+    keyword_ids = [s.keyword_id for s in selections]
+    keywords = [
+        row.keyword for row in
+        db.query(ScraperKeyword)
+        .filter(ScraperKeyword.id.in_(keyword_ids))
+        .all()
+    ]
+    if not keywords:
+        raise HTTPException(400, "No keywords found for Google News")
+
+    # Create task
+    task_id = uuid.uuid4().hex
+    now = datetime.now(tz=timezone.utc)
+
+    try:
+        db.add(TaskHistory(
+            task_id=task_id, scraper="google_news", status="queued",
+            started_at=now, keyword=", ".join(keywords[:3]),
+        ))
+        db.commit()
+    except Exception as exc:
+        logger.warning("Could not save auto-scrape task to DB: %s", exc)
+
+    # Also update in-memory task registry
+    try:
+        from core.container import state
+        state.task_registry[task_id] = {
+            "task_id": task_id, "scraper": "google_news", "status": "queued",
+            "started_at": now.isoformat(), "finished_at": None,
+            "result": None, "error": None,
+        }
+    except Exception:
+        pass
+
+    background_tasks.add_task(_run_auto_scrape, task_id, keywords)
+
+    return {
+        "status": "started",
+        "task_id": task_id,
+        "keywords": keywords,
+        "keyword_count": len(keywords),
+        "max_results": 20,
+    }

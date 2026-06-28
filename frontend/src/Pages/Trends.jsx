@@ -196,22 +196,218 @@ function parseInline(text) {
   });
 }
 
-// ── Block markdown renderer ───────────────────────────────────────────────────
-function MarkdownRenderer({ text, C }) {
-  if (!text) return null;
+// ── Summary stat helpers ──────────────────────────────────────────────────────
+
+// Parse the AI's ## Key Metrics section for stat card values
+function parseSummaryStats(text, recordCount) {
+  const lines = (text || "").split("\n");
+  const kv = {};
+  let inKM = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^##\s+key\s+metrics?$/i.test(t)) { inKM = true; continue; }
+    if (t.startsWith("## ") && inKM) break;
+    if (inKM) {
+      const m = t.match(/^\*\*([^*]+)\*\*:\s*(.+)$/);
+      if (m) kv[m[1].trim().toLowerCase()] = m[2].trim();
+    }
+  }
+  let pos = parseInt(kv["positive sentiment"] || kv["positive"] || "") || null;
+  let neg = parseInt(kv["negative sentiment"] || kv["negative"] || "") || null;
+  if (!pos && !neg) {
+    const sm = (text || "").match(/\*\*sentiment\*\*:\s*(\w+)/i);
+    if (sm) {
+      const sv = sm[1].toLowerCase();
+      if (/positive|bullish|good|great|strong/.test(sv)) { pos = 65; neg = 35; }
+      else if (/negative|bearish|bad|poor|weak/.test(sv)) { pos = 30; neg = 70; }
+      else { pos = 50; neg = 50; }
+    }
+  }
+  return {
+    recordCount: recordCount || 0,
+    pos, neg, hasSentiment: pos !== null || neg !== null,
+    keyFindings: parseInt(kv["key findings"] || kv["findings"] || kv["insights"]) || (((text || "").match(/^[\s]*[-*]\s+\S/gm) || []).length) || null,
+    keyTopics: parseInt(kv["key topics"] || kv["topics"] || kv["themes"]) || null,
+    risks: parseInt(kv["risks"] || kv["risks identified"]) || null,
+    opportunities: parseInt(kv["opportunities"] || kv["opportunities found"]) || null,
+  };
+}
+
+// Dual-tone sentiment bar (green = positive, red = negative)
+function SentimentBar({ pos, neg, isDark, showLabels = true }) {
+  const posP = pos !== null ? Math.min(100, Math.max(0, pos)) : 50;
+  const negP = neg !== null ? Math.min(100, Math.max(0, neg)) : 50;
+  const hasData = pos !== null;
+  const overallLabel = !hasData ? "No data" : posP > negP ? "Positive overall" : posP < negP ? "Negative overall" : "Balanced";
+  const overallColor = !hasData ? "#9ca3af" : posP > negP ? "#10b981" : posP < negP ? "#ef4444" : "#f59e0b";
+  return (
+    <Box>
+      <Box sx={{ position: "relative", height: 7, borderRadius: 4, overflow: "hidden", bgcolor: isDark ? "#1f2937" : "#e5e7eb", mb: showLabels ? 0.75 : 0 }}>
+        <Box sx={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${posP}%`, bgcolor: "#10b981", borderRadius: "4px 0 0 4px", transition: "width 0.8s cubic-bezier(0.34,1.56,0.64,1)" }} />
+        <Box sx={{ position: "absolute", right: 0, top: 0, bottom: 0, width: `${negP}%`, bgcolor: "#ef4444", borderRadius: "0 4px 4px 0", transition: "width 0.8s cubic-bezier(0.34,1.56,0.64,1)" }} />
+      </Box>
+      {showLabels && (
+        <>
+          <Typography sx={{ fontSize: "0.7rem", fontWeight: 700, color: overallColor, mb: 0.3, lineHeight: 1 }}>{overallLabel}</Typography>
+          <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+            <Typography sx={{ fontSize: "0.61rem", color: "#10b981", fontWeight: 600, lineHeight: 1 }}>+{posP}%</Typography>
+            <Typography sx={{ fontSize: "0.61rem", color: "#ef4444", fontWeight: 600, lineHeight: 1 }}>-{negP}%</Typography>
+          </Box>
+        </>
+      )}
+    </Box>
+  );
+}
+
+// Generic compact KPI card with colored left bar
+function StatCard({ title, accent, C, isDark, children }) {
+  return (
+    <Box sx={{
+      flex: 1, minWidth: 0,
+      borderRadius: "11px", border: `1px solid ${accent}28`,
+      bgcolor: isDark ? `${accent}0c` : `${accent}06`,
+      overflow: "hidden", position: "relative",
+      transition: "transform 0.15s ease, box-shadow 0.18s ease",
+      "&:hover": { transform: "translateY(-2px)", boxShadow: `0 8px 24px ${accent}22, 0 0 0 1px ${accent}40`, borderColor: `${accent}44` },
+    }}>
+      <Box sx={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, bgcolor: accent, boxShadow: `2px 0 8px ${accent}55` }} />
+      <Box sx={{ pl: 1.75, pr: 1.5, pt: 1.25, pb: 1.25 }}>
+        <Typography sx={{ fontSize: "0.54rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.9, color: accent, mb: 0.75, lineHeight: 1, display: "block" }}>
+          {title}
+        </Typography>
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+// Trend Analysis: 3-card row (Sources / Sentiment / Key Points)
+function TrendStatCardsRow({ text, recordCount, C, isDark }) {
+  const s = parseSummaryStats(text, recordCount);
+  return (
+    <Box sx={{ display: "flex", gap: 1.25, overflowX: "auto", pb: 0.5, mb: 2.25,
+      "&::-webkit-scrollbar": { height: 4 },
+      "&::-webkit-scrollbar-thumb": { bgcolor: isDark ? "#374151" : "#d1d5db", borderRadius: 4 },
+    }}>
+      <StatCard title="Sources Analyzed" accent="#3b82f6" C={C} isDark={isDark}>
+        <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#3b82f6", lineHeight: 1, mb: 0.25 }}>{s.recordCount}</Typography>
+        <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Posts & articles</Typography>
+      </StatCard>
+
+      <StatCard title="Sentiment" accent="#f59e0b" C={C} isDark={isDark}>
+        <SentimentBar pos={s.pos} neg={s.neg} isDark={isDark} showLabels={s.hasSentiment} />
+        {!s.hasSentiment && <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, mt: 0.5, lineHeight: 1.3 }}>No data yet</Typography>}
+      </StatCard>
+
+      {s.keyFindings !== null && (
+        <StatCard title="Key Points" accent="#7c3aed" C={C} isDark={isDark}>
+          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#7c3aed", lineHeight: 1, mb: 0.25 }}>{s.keyFindings}</Typography>
+          <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Important findings</Typography>
+        </StatCard>
+      )}
+
+      {s.risks !== null && (
+        <StatCard title="Risks" accent="#ef4444" C={C} isDark={isDark}>
+          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#ef4444", lineHeight: 1, mb: 0.25 }}>{s.risks}</Typography>
+          <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Flagged</Typography>
+        </StatCard>
+      )}
+
+      {s.opportunities !== null && (
+        <StatCard title="Opportunities" accent="#10b981" C={C} isDark={isDark}>
+          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#10b981", lineHeight: 1, mb: 0.25 }}>{s.opportunities}</Typography>
+          <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Identified</Typography>
+        </StatCard>
+      )}
+    </Box>
+  );
+}
+
+const TOPIC_CHIP_COLORS = ["#3b82f6","#7c3aed","#10b981","#f59e0b","#06b6d4","#ec4899","#a78bfa","#059669","#c2410c","#4338ca"];
+
+// ── Section card color palette ────────────────────────────────────────────────
+const CARD_PALETTE = [
+  { accent: "#3b82f6" },  // blue
+  { accent: "#8b5cf6" },  // violet
+  { accent: "#10b981" },  // emerald
+  { accent: "#f59e0b" },  // amber
+  { accent: "#ef4444" },  // rose
+  { accent: "#06b6d4" },  // cyan
+  { accent: "#ec4899" },  // pink
+  { accent: "#a78bfa" },  // lavender
+];
+
+// ── Markdown section parser ───────────────────────────────────────────────────
+function parseMdSections(text) {
   const lines = text.split("\n");
+  const sections = [];
+  let pageTitle = null;
+  let cur = null;
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith("# ") && !t.startsWith("## ")) {
+      pageTitle = t.slice(2).trim();
+    } else if (t.startsWith("## ")) {
+      if (cur) sections.push(cur);
+      cur = { title: t.slice(3).trim(), lines: [] };
+    } else {
+      if (!cur) cur = { title: null, lines: [] };
+      cur.lines.push(line);
+    }
+  }
+  if (cur && (cur.title || cur.lines.some(l => l.trim()))) sections.push(cur);
+  return { pageTitle, sections };
+}
+
+// Returns an accent color for a metric value based on its semantic meaning
+function metricColor(value, fallback) {
+  const v = value.toLowerCase().trim();
+  if (/^(positive|true|yes|high|strong|growing|bullish|excellent|great|favorable|upward|increasing|good|verified|very high|very positive|confirmed|rising|above average)/.test(v)) return "#10b981";
+  if (/^(negative|false|no|low|weak|declining|bearish|poor|unfavorable|downward|decreasing|bad|unverified|very low|very negative|falling|below average)/.test(v)) return "#ef4444";
+  if (/^(neutral|mixed|moderate|medium|average|stable|balanced|inconclusive|unclear|uncertain)/.test(v)) return "#f59e0b";
+  if (/\d+%/.test(v)) return "#8b5cf6";
+  if (/^\d+[\/.]\d+/.test(v)) return "#3b82f6";
+  return fallback;
+}
+
+// ── Block content renderer (within a section card) ────────────────────────────
+function SectionContent({ lines, C, isDark, accent }) {
   const blocks = [];
-  let key = 0, i = 0, numberedListStart = 1;
+  let key = 0, i = 0;
 
   while (i < lines.length) {
     const trim = lines[i].trim();
     if (!trim) { i++; continue; }
 
-    if (trim.startsWith("# "))    { numberedListStart = 1; blocks.push(<Typography key={key++} sx={{ fontWeight: 800, fontSize: { xs: "1.15rem", md: "1.35rem" }, color: C.text, mt: blocks.length ? 3 : 0, mb: 0.8, lineHeight: 1.3  }}>{parseInline(trim.slice(2))}</Typography>); i++; continue; }
-    if (trim.startsWith("## "))   { numberedListStart = 1; blocks.push(<Typography key={key++} sx={{ fontWeight: 700, fontSize: { xs: "1rem",    md: "1.15rem" }, color: C.text, mt: 2.5, mb: 0.6, lineHeight: 1.35 }}>{parseInline(trim.slice(3))}</Typography>); i++; continue; }
-    if (trim.startsWith("### "))  { numberedListStart = 1; blocks.push(<Typography key={key++} sx={{ fontWeight: 700, fontSize: { xs: "0.95rem", md: "1.05rem" }, color: C.text, mt: 2,   mb: 0.5, lineHeight: 1.4  }}>{parseInline(trim.slice(4))}</Typography>); i++; continue; }
-    if (trim.startsWith("#### ")) { numberedListStart = 1; blocks.push(<Typography key={key++} sx={{ fontWeight: 600, fontSize: "0.92rem", color: C.text, mt: 1.5, mb: 0.4 }}>{parseInline(trim.slice(5))}</Typography>); i++; continue; }
+    // ### sub-heading
+    if (trim.startsWith("### ")) {
+      blocks.push(
+        <Box key={key++} sx={{ display: "flex", alignItems: "center", gap: 1.25,
+          mt: blocks.length ? 2 : 0, mb: 0.75 }}>
+          <Box sx={{ width: 3, height: 15, borderRadius: 4, bgcolor: accent, flexShrink: 0, opacity: 0.85 }} />
+          <Typography sx={{ fontWeight: 700, fontSize: "0.88rem", color: C.text, letterSpacing: 0.15 }}>
+            {parseInline(trim.slice(4))}
+          </Typography>
+        </Box>
+      );
+      i++; continue;
+    }
 
+    // #### label
+    if (trim.startsWith("#### ")) {
+      blocks.push(
+        <Typography key={key++} sx={{
+          fontWeight: 600, fontSize: "0.72rem", color: accent,
+          textTransform: "uppercase", letterSpacing: 1.1, mt: 1.5, mb: 0.4,
+        }}>
+          {parseInline(trim.slice(5))}
+        </Typography>
+      );
+      i++; continue;
+    }
+
+    // Bullet list — glowing LED markers (the aesthetic risk: data-dashboard indicators)
     if (trim.startsWith("- ") || trim.startsWith("* ")) {
       const items = [];
       while (i < lines.length) {
@@ -219,10 +415,26 @@ function MarkdownRenderer({ text, C }) {
         if (t.startsWith("- ") || t.startsWith("* ")) { items.push(t.slice(2)); i++; }
         else if (!t) { i++; break; } else break;
       }
-      blocks.push(<Box key={key++} component="ul" sx={{ mt: 0.5, mb: 1, pl: 3, listStyleType: "disc" }}>{items.map((item, j) => (<Box key={j} component="li" sx={{ mb: 0.4 }}><Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.75, display: "inline" }}>{parseInline(item)}</Typography></Box>))}</Box>);
+      blocks.push(
+        <Box key={key++} sx={{ mt: 0.5, mb: 1 }}>
+          {items.map((item, j) => (
+            <Box key={j} sx={{ display: "flex", alignItems: "flex-start", gap: 1.5, mb: 0.65 }}>
+              <Box sx={{
+                width: 7, height: 7, borderRadius: "50%",
+                bgcolor: accent, mt: "8px", flexShrink: 0,
+                boxShadow: `0 0 0 2px ${accent}28, 0 0 8px ${accent}50`,
+              }} />
+              <Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.8, fontSize: "0.875rem" }}>
+                {parseInline(item)}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      );
       continue;
     }
 
+    // Numbered list — ranked badge counters
     if (/^\d+\.\s/.test(trim)) {
       const items = [];
       while (i < lines.length) {
@@ -230,35 +442,64 @@ function MarkdownRenderer({ text, C }) {
         if (/^\d+\.\s/.test(t)) { items.push(t.replace(/^\d+\.\s/, "")); i++; }
         else if (!t) { i++; break; } else break;
       }
-      const startAt = numberedListStart;
-      numberedListStart += items.length;
-      blocks.push(<Box key={key++} component="ol" start={startAt} sx={{ mt: 0.5, mb: 1, pl: 3 }}>{items.map((item, j) => (<Box key={j} component="li" sx={{ mb: 0.4 }}><Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.75, display: "inline" }}>{parseInline(item)}</Typography></Box>))}</Box>);
+      blocks.push(
+        <Box key={key++} sx={{ mt: 0.5, mb: 1 }}>
+          {items.map((item, j) => (
+            <Box key={j} sx={{ display: "flex", alignItems: "flex-start", gap: 1.5, mb: 0.85 }}>
+              <Box sx={{
+                minWidth: 24, height: 24, borderRadius: "50%",
+                bgcolor: `${accent}20`, border: `1.5px solid ${accent}`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0, mt: "1px",
+              }}>
+                <Typography sx={{ fontSize: "0.6rem", fontWeight: 800, color: accent, lineHeight: 1 }}>
+                  {j + 1}
+                </Typography>
+              </Box>
+              <Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.8, fontSize: "0.875rem" }}>
+                {parseInline(item)}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      );
       continue;
     }
 
+    // Divider — accent gradient fade
     if (trim === "---" || trim === "***" || trim === "___") {
-      blocks.push(<Divider key={key++} sx={{ my: 2, borderColor: C.border }} />);
+      blocks.push(
+        <Box key={key++} sx={{
+          my: 1.75, height: "1px",
+          background: `linear-gradient(90deg, ${accent}55 0%, ${accent}22 50%, transparent 100%)`,
+        }} />
+      );
       i++; continue;
     }
 
+    // Table — accent-tinted header
     if (trim.startsWith("|")) {
       const tableLines = [];
       while (i < lines.length && lines[i].trim().startsWith("|")) { tableLines.push(lines[i].trim()); i++; }
-      const isSep   = (l) => /^[\|\s\-:]+$/.test(l);
+      const isSep    = (l) => /^[\|\s\-:]+$/.test(l);
       const parseRow = (l) => l.split("|").slice(1, -1).map(c => c.trim());
-      const rows    = tableLines.filter(l => !isSep(l));
+      const rows     = tableLines.filter(l => !isSep(l));
       if (rows.length >= 1) {
         const headers  = parseRow(rows[0]);
         const dataRows = rows.slice(1).map(parseRow);
         blocks.push(
-          <Box key={key++} sx={{ overflowX: "auto", mb: 2, mt: 1 }}>
-            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.85rem" }}>
+          <Box key={key++} sx={{ overflowX: "auto", mb: 1.5, mt: 0.75,
+            borderRadius: "8px", border: `1px solid ${accent}25`, overflow: "hidden" }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.82rem" }}>
               <thead>
-                <tr>
+                <tr style={{ background: `${accent}1a` }}>
                   {headers.map((h, j) => (
-                    <th key={j} style={{ borderBottom: `2px solid ${C.border}`, padding: "8px 14px",
-                      textAlign: "left", color: C.text, fontWeight: 700, whiteSpace: "nowrap",
-                      backgroundColor: C.cardInner }}>
+                    <th key={j} style={{
+                      padding: "9px 14px", textAlign: "left",
+                      color: isDark ? "#e5e7eb" : "#111827",
+                      fontWeight: 700, borderBottom: `2px solid ${accent}40`,
+                      whiteSpace: "nowrap",
+                    }}>
                       {parseInline(h)}
                     </th>
                   ))}
@@ -266,10 +507,14 @@ function MarkdownRenderer({ text, C }) {
               </thead>
               <tbody>
                 {dataRows.map((row, ri) => (
-                  <tr key={ri} style={{ borderBottom: `1px solid ${C.border}`,
-                    backgroundColor: ri % 2 === 0 ? "transparent" : C.cardInner + "88" }}>
+                  <tr key={ri} style={{ background: ri % 2 === 0 ? "transparent" : `${accent}08` }}>
                     {row.map((cell, ci) => (
-                      <td key={ci} style={{ padding: "7px 14px", color: C.textSub, verticalAlign: "top" }}>
+                      <td key={ci} style={{
+                        padding: "7px 14px",
+                        color: isDark ? "#9ca3af" : "#374151",
+                        borderBottom: `1px solid ${accent}18`,
+                        verticalAlign: "top",
+                      }}>
                         {parseInline(cell)}
                       </td>
                     ))}
@@ -283,18 +528,185 @@ function MarkdownRenderer({ text, C }) {
       continue;
     }
 
+    // Metric cards: **Label**: Value on their own line — renders as colored indicator chips
+    if (/^\*\*[^*]+\*\*:\s*\S/.test(trim)) {
+      const metrics = [];
+      while (i < lines.length) {
+        const t = lines[i].trim();
+        if (/^\*\*[^*]+\*\*:\s*\S/.test(t)) {
+          const m = t.match(/^\*\*([^*]+)\*\*:\s*(.+)$/);
+          if (m) metrics.push({ label: m[1].trim(), value: m[2].trim() });
+          i++;
+        } else if (!t) { i++; break; } else break;
+      }
+      if (metrics.length) {
+        blocks.push(
+          <Box key={key++} sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 0.75, mb: 1.5 }}>
+            {metrics.map((m, j) => {
+              const mColor = metricColor(m.value, accent);
+              return (
+                <Box key={j} sx={{
+                  display: "inline-flex", flexDirection: "column", alignItems: "flex-start",
+                  px: 1.25, py: 0.75, borderRadius: "8px", minWidth: 76,
+                  border: `1px solid ${mColor}35`,
+                  bgcolor: isDark ? `${mColor}15` : `${mColor}0d`,
+                  transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                  "&:hover": { transform: "translateY(-2px)", boxShadow: `0 4px 14px ${mColor}30` },
+                }}>
+                  <Typography sx={{
+                    fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase",
+                    letterSpacing: 0.9, mb: 0.3, lineHeight: 1,
+                    color: isDark ? `${mColor}bb` : `${mColor}99`,
+                  }}>
+                    {m.label}
+                  </Typography>
+                  <Typography sx={{ fontSize: "0.85rem", fontWeight: 800, lineHeight: 1.2, color: mColor }}>
+                    {m.value}
+                  </Typography>
+                </Box>
+              );
+            })}
+          </Box>
+        );
+      }
+      continue;
+    }
+
+    // Paragraph
     const paraLines = [];
     while (i < lines.length) {
       const t = lines[i].trim();
       if (!t) { i++; break; }
-      if (/^#{1,4}\s/.test(t) || t.startsWith("- ") || t.startsWith("* ") || /^\d+\.\s/.test(t) || t === "---" || t.startsWith("|")) break;
+      if (/^#{1,4}\s/.test(t) || t.startsWith("- ") || t.startsWith("* ") ||
+          /^\d+\.\s/.test(t) || t === "---" || t.startsWith("|") ||
+          /^\*\*[^*]+\*\*:\s*\S/.test(t)) break;
       paraLines.push(t); i++;
     }
     if (paraLines.length)
-      blocks.push(<Typography key={key++} variant="body2" sx={{ color: C.textSub, lineHeight: 1.85, mb: 0.5, fontSize: "0.92rem" }}>{parseInline(paraLines.join(" "))}</Typography>);
+      blocks.push(
+        <Typography key={key++} variant="body2"
+          sx={{ color: C.textSub, lineHeight: 1.85, mb: 0.5, fontSize: "0.9rem" }}>
+          {parseInline(paraLines.join(" "))}
+        </Typography>
+      );
   }
 
   return <>{blocks}</>;
+}
+
+// ── Individual collapsible section card ───────────────────────────────────────
+function SectionCard({ sec, idx, C, isDark }) {
+  const [expanded, setExpanded] = useState(true);
+  const { accent } = CARD_PALETTE[idx % CARD_PALETTE.length];
+
+  return (
+    <Box sx={{
+      borderRadius: "12px",
+      border: `1px solid ${accent}28`,
+      bgcolor: isDark ? `${accent}09` : `${accent}05`,
+      overflow: "hidden",
+      transition: "box-shadow 0.22s ease, border-color 0.22s ease",
+      "&:hover": {
+        boxShadow: `0 0 0 1px ${accent}45, 0 8px 28px ${accent}1c`,
+        borderColor: `${accent}55`,
+      },
+    }}>
+      {/* Header — click to collapse/expand */}
+      {sec.title && (
+        <Box
+          onClick={() => setExpanded(v => !v)}
+          sx={{
+            px: 2.25, py: 1.2, cursor: "pointer", userSelect: "none",
+            background: isDark
+              ? `linear-gradient(115deg, ${accent}1e 0%, ${accent}0b 100%)`
+              : `linear-gradient(115deg, ${accent}12 0%, ${accent}06 100%)`,
+            borderBottom: expanded ? `1px solid ${accent}22` : "none",
+            display: "flex", alignItems: "center", gap: 1.5,
+          }}
+        >
+          <Box sx={{ width: 4, height: 22, borderRadius: 4, flexShrink: 0, bgcolor: accent, boxShadow: `0 0 10px ${accent}70` }} />
+          <Typography sx={{
+            fontWeight: 700, fontSize: "0.9rem", flex: 1,
+            color: isDark ? `${accent}f2` : accent,
+            letterSpacing: 0.15, lineHeight: 1.3,
+          }}>
+            {parseInline(sec.title)}
+          </Typography>
+          <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: accent, flexShrink: 0, boxShadow: `0 0 6px ${accent}90`, opacity: isDark ? 0.75 : 0.6 }} />
+          <Box sx={{
+            color: `${accent}99`, display: "flex", alignItems: "center",
+            transition: "transform 0.2s ease",
+            transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
+          }}>
+            <ExpandMoreIcon sx={{ fontSize: 16 }} />
+          </Box>
+        </Box>
+      )}
+
+      {/* Body — topics section gets chip rendering; others get standard markdown */}
+      <Collapse in={expanded}>
+        {(() => {
+          const isTopics = /key\s*topics?|main\s*topics?|topics?\s+identified|themes?/i.test(sec.title || "");
+          const topicNames = isTopics
+            ? sec.lines.map(l => { const m = l.trim().match(/^[-*]\s+(.+)$/) || l.trim().match(/^\d+\.\s+(.+)$/); return m ? m[1].replace(/\*\*/g, "").trim() : null; }).filter(Boolean)
+            : [];
+          return (
+            <Box sx={{ px: 2.25, py: sec.title ? 1.75 : 2.25 }}>
+              {isTopics && topicNames.length > 0 ? (
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.85 }}>
+                  {topicNames.map((topic, j) => {
+                    const tc = TOPIC_CHIP_COLORS[j % TOPIC_CHIP_COLORS.length];
+                    return (
+                      <Box key={j} sx={{
+                        px: 1.5, py: 0.65, borderRadius: "20px",
+                        border: `1.5px solid ${tc}42`,
+                        bgcolor: isDark ? `${tc}1a` : `${tc}0f`,
+                        color: tc, fontSize: "0.8rem", fontWeight: 600,
+                        cursor: "default",
+                        transition: "transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease",
+                        "&:hover": { transform: "scale(1.05)", boxShadow: `0 0 12px ${tc}32`, bgcolor: isDark ? `${tc}28` : `${tc}18` },
+                      }}>
+                        {topic}
+                      </Box>
+                    );
+                  })}
+                </Box>
+              ) : (
+                <SectionContent lines={sec.lines} C={C} isDark={isDark} accent={accent} />
+              )}
+            </Box>
+          );
+        })()}
+      </Collapse>
+    </Box>
+  );
+}
+
+// ── Card-based markdown renderer ──────────────────────────────────────────────
+function MarkdownRenderer({ text, C, isDark }) {
+  if (!text) return null;
+  const { pageTitle, sections } = parseMdSections(text);
+  // Strip the Key Metrics section — it feeds the stat cards row instead
+  const display = sections
+    .map((sec, i) => ({ sec, i }))
+    .filter(({ sec }) => !/^key\s+metrics?$/i.test(sec.title || ""));
+  if (!display.length) return null;
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.75 }}>
+      {pageTitle && (
+        <Typography sx={{
+          fontWeight: 800, fontSize: { xs: "1.1rem", md: "1.25rem" },
+          color: C.text, mb: 0.25, lineHeight: 1.3,
+        }}>
+          {parseInline(pageTitle)}
+        </Typography>
+      )}
+      {display.map(({ sec, i }) => (
+        <SectionCard key={i} sec={sec} idx={i} C={C} isDark={isDark} />
+      ))}
+    </Box>
+  );
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────
@@ -872,35 +1284,37 @@ const Trends = () => {
                 </Collapse>
               </Box>
 
-              {/* Response card */}
-              <Box sx={{ bgcolor: C.card, borderRadius: 2, border: `1px solid ${C.border}`, overflow: "hidden" }}>
-                <Box sx={{ px: 3, py: 2, borderBottom: `1px solid ${C.border}`,
-                  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: provColor, flexShrink: 0 }} />
-                    <Typography sx={{ fontWeight: 700, color: C.text, fontSize: "0.95rem" }}>
-                      AI Response
-                    </Typography>
-                  </Box>
-                  <Tooltip title={copied ? "Copied!" : "Copy to clipboard"}>
+              {/* Response area — section cards with action strip */}
+              <Box>
+                {/* Action row: copy + section count */}
+                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                  mb: 1.5, px: 0.25 }}>
+                  <Typography variant="caption" sx={{ color: C.textMuted, fontWeight: 600, letterSpacing: 0.5 }}>
+                    AI ANALYSIS
+                  </Typography>
+                  <Tooltip title={copied ? "Copied!" : "Copy full response"}>
                     <IconButton size="small" onClick={handleCopy}
                       sx={{ color: copied ? "#10b981" : C.textMuted,
-                        border: `1px solid ${C.border}`,
-                        "&:hover": { color: "#10b981", borderColor: "#10b981" } }}>
-                      <ContentCopyIcon sx={{ fontSize: 15 }} />
+                        border: `1px solid ${copied ? "#10b98140" : C.border}`,
+                        transition: "color 0.2s, border-color 0.2s",
+                        "&:hover": { color: "#10b981", borderColor: "#10b98140" } }}>
+                      <ContentCopyIcon sx={{ fontSize: 14 }} />
                     </IconButton>
                   </Tooltip>
                 </Box>
 
-                <Box sx={{ px: { xs: 2.5, md: 4 }, py: { xs: 2.5, md: 3.5 } }}>
-                  <MarkdownRenderer text={result.response} C={C} />
-                </Box>
+                {/* Stat summary row */}
+                <TrendStatCardsRow text={result.response} recordCount={result.recordCount} C={C} isDark={isDark} />
 
-                <Box sx={{ px: 3, py: 1.5, borderTop: `1px solid ${C.border}`,
-                  bgcolor: C.cardInner, display: "flex", justifyContent: "space-between",
+                {/* Section cards */}
+                <MarkdownRenderer text={result.response} C={C} isDark={isDark} />
+
+                {/* Footer action bar */}
+                <Box sx={{ mt: 2, pt: 1.5, borderTop: `1px solid ${C.border}`,
+                  display: "flex", justifyContent: "space-between",
                   alignItems: "center", flexWrap: "wrap", gap: 1 }}>
                   <Typography variant="caption" sx={{ color: C.textMuted }}>
-                    Generated by {provLabel} · {dateLabel}
+                    {provLabel} · {dateLabel}
                   </Typography>
                   <Stack direction="row" spacing={1} alignItems="center">
                     <Button size="small"

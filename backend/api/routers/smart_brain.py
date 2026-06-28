@@ -183,7 +183,7 @@ async def smart_brain_parse_file(file: UploadFile = File(...)):
     ext      = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     text     = ""
     try:
-        if ext == "txt":
+        if ext in ("txt", "mx"):
             text = content.decode("utf-8", errors="replace")
         elif ext == "pdf":
             from pypdf import PdfReader
@@ -194,7 +194,7 @@ async def smart_brain_parse_file(file: UploadFile = File(...)):
             doc  = Document(io.BytesIO(content))
             text = "\n".join(p.text for p in doc.paragraphs)
         else:
-            raise HTTPException(400, "Unsupported file type. Upload a .txt, .pdf, or .docx file.")
+            raise HTTPException(400, "Unsupported file type. Upload a .txt, .pdf, .docx, or .mx file.")
     except HTTPException:
         raise
     except Exception as exc:
