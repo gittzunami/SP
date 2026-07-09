@@ -23,6 +23,7 @@ import { BudgetProvider }             from "./core/contexts";
 import { AppThemeProvider, useAppTheme } from "./core/contexts";
 import { NotificationProvider }       from "./core/contexts";
 import { AuthProvider, useAuth }      from "./core/contexts";
+import { useIdleLogout }              from "./core/hooks/useIdleLogout";
 
 import GlobalBudgetBanner from "./GlobalBudgetBanner";
 
@@ -30,6 +31,11 @@ import GlobalBudgetBanner from "./GlobalBudgetBanner";
 function PrivateRoute({ children }) {
   const { isAuthenticated } = useAuth();
   return isAuthenticated ? children : <Navigate to="/login" replace />;
+}
+
+function IdleLogoutWatcher() {
+  useIdleLogout();
+  return null;
 }
 
 function AppInner() {
@@ -40,6 +46,7 @@ function AppInner() {
 
   return (
     <Router>
+      <IdleLogoutWatcher />
       <Routes>
         {/* Public */}
         <Route path="/login" element={<Login />} />

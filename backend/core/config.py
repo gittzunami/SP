@@ -13,7 +13,7 @@ class Settings:
     # ── Auth ──────────────────────────────────────────────────────────────────
     JWT_SECRET: str       = os.environ.get("JWT_SECRET_KEY", "trendsense-dev-secret-change-in-prod")
     JWT_ALGORITHM: str    = "HS256"
-    JWT_EXPIRE_H: int     = int(os.environ.get("JWT_EXPIRE_HOURS", "8"))
+    JWT_EXPIRE_H: int     = int(os.environ.get("JWT_EXPIRE_HOURS", "1"))
     LOGIN_USERNAME: str   = os.environ.get("LOGIN_USERNAME", "").strip()
     LOGIN_PASSWORD: str   = os.environ.get("LOGIN_PASSWORD", "").strip()
 
