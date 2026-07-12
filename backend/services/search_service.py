@@ -446,7 +446,6 @@ def _search_google_news(db, keyword, limit, offset, cutoff=None, scrape_keyword=
     q = db.query(GoogleNewsArticle).filter(or_(
         GoogleNewsArticle.title.ilike(f"%{keyword}%"),
         GoogleNewsArticle.description.ilike(f"%{keyword}%"),
-        GoogleNewsArticle.full_text.ilike(f"%{keyword}%"),
     ))
     q = _apply_run_date_filter(q, GoogleNewsArticle, cutoff, scrape_keyword)
     total = q.count()
@@ -671,8 +670,7 @@ def _export_google_news(db, keyword, limit):
     q = db.query(GoogleNewsArticle)
     if keyword:
         q = q.filter(or_(GoogleNewsArticle.title.ilike(f"%{keyword}%"),
-                         GoogleNewsArticle.description.ilike(f"%{keyword}%"),
-                         GoogleNewsArticle.full_text.ilike(f"%{keyword}%")))
+                         GoogleNewsArticle.description.ilike(f"%{keyword}%")))
     return [_gnews_full(r) for r in q.order_by(GoogleNewsArticle.published_at.desc()).limit(limit).all()]
 
 def _export_selected_google_news(db, ids):

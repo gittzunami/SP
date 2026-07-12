@@ -286,7 +286,9 @@ const CostGovernance = () => {
       const scraperBudgetRes = await apiFetch(`${API_BASE}/api/spending/scraper-budgets`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ budgets: Object.fromEntries(
-          Object.entries(allocations).map(([k, v]) => [k, parseFloat(v) || 0])
+          Object.entries(allocations)
+            .filter(([k]) => !FREE_TOOLS.has(k))
+            .map(([k, v]) => [k, parseFloat(v) || 0])
         ) }),
       });
       if (!scraperBudgetRes.ok) {

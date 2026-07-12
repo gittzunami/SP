@@ -386,9 +386,21 @@ def get_scraper_budget_status(db) -> dict:
         # ── Aggregate by tool ─────────────────────────────────────────────
         tool_status = {}
         for tool, tool_scrapers in TOOL_SCRAPER_MAP.items():
-            # Sum spending across all scrapers in this tool
             spent = sum(spend_map.get(s, 0.0) for s in tool_scrapers)
-            budget = budget_map.get(tool, 0.0)
+
+            # Free tools never need a budget and are never blocked
+            if tool in FREE_TOOLS:
+                tool_status[tool] = {
+                    "spent_usd":  round(spent, 4),
+                    "budget_usd": 0,
+                    "pct":        0,
+                    "is_blocked": False,
+                    "is_warning": False,
+                    "no_budget":  False,
+                }
+                continue
+
+            budget     = budget_map.get(tool, 0.0)
             no_budget  = budget <= 0
             pct        = (spent / budget * 100) if budget > 0 else 0.0
             is_blocked = no_budget or pct >= 97.0
@@ -511,7 +523,7 @@ def get_spending_summary(db) -> dict:
         return _empty_summary()
 
     try:
-        from db_models import ApiSpending, UserBudget
+        from db_models import ApiSpending, UserBudget, LLMSpending
         from sqlalchemy import func
         import calendar
 
@@ -523,12 +535,21 @@ def get_spending_summary(db) -> dict:
             db.query(func.coalesce(func.sum(ApiSpending.cost_usd), 0))
               .filter(ApiSpending.called_at >= today_start).scalar() or 0.0
         )
+        today_usd += float(
+            db.query(func.coalesce(func.sum(LLMSpending.cost_usd), 0))
+              .filter(LLMSpending.called_at >= today_start).scalar() or 0.0
+        )
 
         week_ago = today_start - timedelta(days=7)
         week_usd = float(
             db.query(func.coalesce(func.sum(ApiSpending.cost_usd), 0))
               .filter(ApiSpending.called_at >= week_ago,
                       ApiSpending.called_at < today_start).scalar() or 0.0
+        )
+        week_usd += float(
+            db.query(func.coalesce(func.sum(LLMSpending.cost_usd), 0))
+              .filter(LLMSpending.called_at >= week_ago,
+                      LLMSpending.called_at < today_start).scalar() or 0.0
         )
         daily_avg_7d    = week_usd / 7.0 if week_usd > 0 else 0.0
         today_vs_7d_pct = (
@@ -539,6 +560,10 @@ def get_spending_summary(db) -> dict:
         month_usd = float(
             db.query(func.coalesce(func.sum(ApiSpending.cost_usd), 0))
               .filter(ApiSpending.called_at >= month_start).scalar() or 0.0
+        )
+        month_usd += float(
+            db.query(func.coalesce(func.sum(LLMSpending.cost_usd), 0))
+              .filter(LLMSpending.called_at >= month_start).scalar() or 0.0
         )
 
         days_in_month   = calendar.monthrange(now.year, now.month)[1]
@@ -578,6 +603,24 @@ def get_spending_summary(db) -> dict:
             }
             for row in svc_rows
         ]
+
+        llm_rows = (
+            db.query(
+                LLMSpending.provider,
+                LLMSpending.model,
+                func.sum(LLMSpending.cost_usd).label("month_usd"),
+            )
+            .filter(LLMSpending.called_at >= month_start)
+            .group_by(LLMSpending.provider, LLMSpending.model)
+            .all()
+        )
+        for row in llm_rows:
+            service_breakdown.append({
+                "service":   f"llm_{row.model}",
+                "provider":  row.provider,
+                "month_usd": round(float(row.month_usd or 0), 4),
+                "cap_usd":   round(budget_usd * 0.25, 2),
+            })
 
         high_cost_rows = (
             db.query(ApiSpending)
