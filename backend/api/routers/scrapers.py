@@ -155,18 +155,19 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
 
     spend_db = database.SessionLocal() if database.SessionLocal is not None else None
 
-    # Per-scraper budget block check
+    # Per-tool budget block check
     if spend_db:
         try:
-            from services.spending_service import get_scraper_budget_status
-            bs = get_scraper_budget_status(spend_db).get(scraper, {})
+            from services.spending_service import get_scraper_budget_status, SCRAPER_TOOL
+            tool = SCRAPER_TOOL.get(scraper, scraper)
+            bs = get_scraper_budget_status(spend_db).get(tool, {})
             if bs.get("is_blocked"):
                 reason = (
                     "No budget allocated — set a budget in Cost Governance"
                     if bs.get("no_budget") else
                     f"Budget limit reached ({bs.get('pct', 0):.1f}% of ${bs.get('budget_usd', 0):.2f})"
                 )
-                err_msg = f"Scraper blocked: {reason}"
+                err_msg = f"Tool {tool} blocked: {reason}"
                 logger.warning("Task %s (%s) blocked before start — %s", task_id[:8], scraper, reason)
                 state.task_registry[task_id].update({
                     "status": "failed", "error": err_msg,

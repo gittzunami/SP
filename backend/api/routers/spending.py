@@ -23,6 +23,12 @@ VALID_SCRAPERS = frozenset({
     "twitter", "instagram", "google_news", "spiceworks", "quora", "facebook",
 })
 
+# Tool-level budget keys (used in ScraperBudget table)
+VALID_TOOLS = frozenset({
+    "scrapedo", "scrapingbee", "stackexchange", "autodesk",
+    "getxapi", "scrappa", "scrapecreators",
+})
+
 
 # ── Overall budget ────────────────────────────────────────────────────────────
 
@@ -84,14 +90,15 @@ def get_scraper_budgets(db: Session = Depends(get_db)):
     return get_scraper_budget_status(db)
 
 
-@router.post("/scraper-budgets", summary="Save per-scraper budget allocations")
+@router.post("/scraper-budgets", summary="Save per-tool budget allocations")
 def set_scraper_budgets(body: Dict[str, Any], db: Session = Depends(get_db)):
     from db_models import ScraperBudget, UserBudget, ApiSpending
     from sqlalchemy import func as _func
+    from services.spending_service import TOOL_SCRAPER_MAP
 
     budgets = body.get("budgets", {})
     if not isinstance(budgets, dict):
-        raise HTTPException(400, "'budgets' must be an object mapping scraper → amount")
+        raise HTTPException(400, "'budgets' must be an object mapping tool → amount")
 
     overall_row    = db.query(UserBudget).filter_by(id=1).first()
     overall_budget = overall_row.monthly_limit_usd if overall_row else settings.DEFAULT_MONTHLY_BUDGET_USD
@@ -108,35 +115,37 @@ def set_scraper_budgets(body: Dict[str, Any], db: Session = Depends(get_db)):
         day=1, hour=0, minute=0, second=0, microsecond=0
     )
     violations = []
-    for scraper, amount in budgets.items():
-        if scraper not in VALID_SCRAPERS:
+    for tool, amount in budgets.items():
+        if tool not in VALID_TOOLS:
             continue
         amount_f = float(amount or 0)
         if amount_f <= 0:
             continue
+        # Sum spending across all scrapers in this tool
+        tool_scrapers = TOOL_SCRAPER_MAP.get(tool, [tool])
         spent = float(
             db.query(_func.coalesce(_func.sum(ApiSpending.cost_usd), 0))
-              .filter(ApiSpending.scraper == scraper, ApiSpending.called_at >= month_start)
+              .filter(ApiSpending.scraper.in_(tool_scrapers), ApiSpending.called_at >= month_start)
               .scalar() or 0.0
         )
         if amount_f < spent:
             violations.append(
-                f"{scraper}: cannot set ${amount_f:.2f} — already spent ${spent:.4f} this month"
+                f"{tool}: cannot set ${amount_f:.2f} — already spent ${spent:.4f} this month"
             )
     if violations:
         raise HTTPException(400, "Budget below current spend: " + "; ".join(violations))
 
     now = datetime.now(tz=timezone.utc)
-    for scraper, amount in budgets.items():
-        if scraper not in VALID_SCRAPERS:
+    for tool, amount in budgets.items():
+        if tool not in VALID_TOOLS:
             continue
         amount = float(amount or 0)
-        row = db.query(ScraperBudget).filter_by(scraper=scraper).first()
+        row = db.query(ScraperBudget).filter_by(scraper=tool).first()
         if row:
             row.budget_usd = amount
             row.updated_at = now
         else:
-            db.add(ScraperBudget(scraper=scraper, budget_usd=amount, updated_at=now))
+            db.add(ScraperBudget(scraper=tool, budget_usd=amount, updated_at=now))
 
     db.commit()
     return {"status": "ok", "budgets": budgets, "total_allocated": round(total_alloc, 2)}

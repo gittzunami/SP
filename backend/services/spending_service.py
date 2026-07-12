@@ -27,6 +27,21 @@ _ALL_SCRAPERS = {
     "twitter", "google_news", "spiceworks", "quora", "facebook",
 }
 
+# ── Tool → Scrapers mapping ──────────────────────────────────────────────────
+# Budget is set per tool. Scrapers sharing a tool share that tool's budget.
+TOOL_SCRAPER_MAP = {
+    "scrapedo":       ["reddit", "spiceworks", "quora"],
+    "scrapingbee":    ["edugeek"],
+    "stackexchange":  ["stackexchange"],
+    "autodesk":       ["autodesk"],
+    "getxapi":        ["twitter"],
+    "scrappa":        ["google_news"],
+    "scrapecreators": ["facebook"],
+}
+SCRAPER_TOOL = {s: t for t, ss in TOOL_SCRAPER_MAP.items() for s in ss}
+ALL_TOOLS = set(TOOL_SCRAPER_MAP.keys())
+FREE_TOOLS = {"stackexchange", "autodesk"}
+
 # Maps scraper key to its .env rate variable
 _SCRAPER_RATE_ENV = {
     "google_news":   "GOOGLE_NEWS_COST_RATE",
@@ -339,7 +354,8 @@ def save_scraper_budgets(db, budgets: dict) -> None:
 
 def get_scraper_budget_status(db) -> dict:
     """
-    Returns per-scraper spend vs budget + block/warning flags.
+    Returns per-tool spend vs budget + block/warning flags.
+    Budget is set per tool. Scrapers sharing a tool inherit its status.
     Also fires alert emails when thresholds are crossed.
     """
     if db is None:
@@ -363,22 +379,22 @@ def get_scraper_budget_status(db) -> dict:
         )
         spend_map = {r.scraper: float(r.spent or 0) for r in spend_rows}
 
-        # Budget allocations from DB
+        # Budget allocations from DB (keyed by tool name)
         budget_rows = db.query(ScraperBudget).all()
         budget_map  = {r.scraper: r.budget_usd for r in budget_rows}
 
-        result = {}
-        all_scrapers = _ALL_SCRAPERS | set(spend_map.keys()) | set(budget_map.keys())
-
-        for scraper in all_scrapers:
-            spent      = spend_map.get(scraper, 0.0)
-            budget     = budget_map.get(scraper, 0.0)
+        # ── Aggregate by tool ─────────────────────────────────────────────
+        tool_status = {}
+        for tool, tool_scrapers in TOOL_SCRAPER_MAP.items():
+            # Sum spending across all scrapers in this tool
+            spent = sum(spend_map.get(s, 0.0) for s in tool_scrapers)
+            budget = budget_map.get(tool, 0.0)
             no_budget  = budget <= 0
             pct        = (spent / budget * 100) if budget > 0 else 0.0
             is_blocked = no_budget or pct >= 97.0
             is_warning = not is_blocked and pct >= 77.0
 
-            result[scraper] = {
+            tool_status[tool] = {
                 "spent_usd":  round(spent,  4),
                 "budget_usd": round(budget, 2),
                 "pct":        round(pct,    1),
@@ -389,7 +405,18 @@ def get_scraper_budget_status(db) -> dict:
 
             # Fire alert email only when the user has set a budget and crossed a threshold
             if not no_budget and (is_warning or is_blocked):
-                _maybe_send_scraper_alert(db, scraper, pct, is_blocked, budget)
+                _maybe_send_scraper_alert(db, tool, pct, is_blocked, budget)
+
+        # ── Map each scraper to its tool's status ─────────────────────────
+        result = {}
+        for scraper in _ALL_SCRAPERS:
+            tool = SCRAPER_TOOL.get(scraper, scraper)
+            if tool in tool_status:
+                result[scraper] = tool_status[tool]
+
+        # Also include tool-level entries directly (for frontend tool display)
+        for tool, status in tool_status.items():
+            result[tool] = status
 
         return result
 
@@ -398,11 +425,11 @@ def get_scraper_budget_status(db) -> dict:
         return {}
 
 
-def _maybe_send_scraper_alert(db, scraper: str, pct: float,
+def _maybe_send_scraper_alert(db, tool: str, pct: float,
                                is_blocked: bool, budget_usd: float) -> None:
-    """Send email alert once per session when scraper crosses 77% or 97%."""
+    """Send email alert once per session when a tool budget crosses 77% or 97%."""
     level     = "blocked" if is_blocked else "warning"
-    cache_key = f"{scraper}:{level}"
+    cache_key = f"{tool}:{level}"
 
     if _scraper_alert_sent.get(cache_key) == budget_usd:
         return  # already sent for this exact budget — skip to avoid spam
@@ -411,8 +438,7 @@ def _maybe_send_scraper_alert(db, scraper: str, pct: float,
         from db_models import BudgetAlertEmail
         emails = [r.email for r in db.query(BudgetAlertEmail).all()]
         if not emails:
-            # Don't cache — retry next poll once emails are configured
-            logger.info("Scraper alert skipped for %s (no emails configured yet)", scraper)
+            logger.info("Tool alert skipped for %s (no emails configured yet)", tool)
             return
 
         smtp_host = os.environ.get("ALERT_SMTP_HOST", "smtp.gmail.com")
@@ -421,20 +447,23 @@ def _maybe_send_scraper_alert(db, scraper: str, pct: float,
         smtp_pass = os.environ.get("ALERT_SMTP_PASS", "")
 
         if not smtp_user or not smtp_pass:
-            logger.warning("SMTP not configured — skipping scraper alert for %s", scraper)
-            return  # Don't cache — retry once SMTP is configured
+            logger.warning("SMTP not configured — skipping tool alert for %s", tool)
+            return
 
+        affected_scrapers = TOOL_SCRAPER_MAP.get(tool, [tool])
+        scraper_list = ", ".join(s.replace("_", " ").title() for s in affected_scrapers)
         color   = "#ef4444" if is_blocked else "#f59e0b"
-        heading = "🚫 Collection Blocked" if is_blocked else "⚠️ Budget Warning"
+        heading = "🚫 Tool Budget Blocked" if is_blocked else "⚠️ Tool Budget Warning"
         subject = (
-            f"🚫 {scraper.upper()} collection BLOCKED — {pct:.1f}% budget used"
+            f"🚫 {tool.upper()} tool BLOCKED — {pct:.1f}% budget used"
             if is_blocked else
-            f"⚠️ {scraper.upper()} collection warning — {pct:.1f}% of budget used"
+            f"⚠️ {tool.upper()} tool warning — {pct:.1f}% of budget used"
         )
         action = (
-            "The collection is now <strong>blocked</strong> until you increase its budget allocation."
+            f"The following collections are now <strong>blocked</strong>: {scraper_list}. "
+            "Increase the tool budget in Cost Governance to resume."
             if is_blocked else
-            "The collection continues running but is approaching its limit."
+            f"Affects: {scraper_list}. The collections continue running but are approaching their limit."
         )
 
         body_html = f"""
@@ -442,13 +471,13 @@ def _maybe_send_scraper_alert(db, scraper: str, pct: float,
           <div style="max-width:520px;margin:0 auto;background:#111827;border-radius:12px;
                       border:1px solid #1e293b;padding:32px">
             <h2 style="color:{color};margin-top:0">{heading}</h2>
-            <p>The <strong>{scraper.upper()}</strong> collection has reached
+            <p>The <strong>{tool.upper()}</strong> tool has reached
                <strong style="color:#f97316">{pct:.1f}%</strong> of its
                <strong>${budget_usd:,.2f}</strong> monthly allocation.</p>
             <p>{action}</p>
             <hr style="border-color:#1e293b;margin:24px 0"/>
             <p style="color:#64748b;font-size:0.85rem">
-              Manage allocations at
+              Manage tool budgets at
               <strong>Cost Governance → Modifications → Budget Per Source</strong>.
             </p>
           </div>
@@ -468,11 +497,11 @@ def _maybe_send_scraper_alert(db, scraper: str, pct: float,
                 msg.attach(MIMEText(body_html, "html"))
                 server.sendmail(smtp_user, recipient, msg.as_string())
 
-        _scraper_alert_sent[cache_key] = budget_usd  # store budget — re-fires if budget changes
-        logger.info("Scraper alert email sent for %s (%s) budget=%.2f", scraper, level, budget_usd)
+        _scraper_alert_sent[cache_key] = budget_usd
+        logger.info("Tool alert email sent for %s (%s) budget=%.2f", tool, level, budget_usd)
 
     except Exception as exc:
-        logger.error("Scraper alert email failed for %s: %s", scraper, exc)
+        logger.error("Tool alert email failed for %s: %s", tool, exc)
 
 
 # ── Dashboard summary ─────────────────────────────────────────────────────────
