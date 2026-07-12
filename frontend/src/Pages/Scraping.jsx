@@ -26,6 +26,19 @@ const STORAGE_KEY = "scraper_cards_v3";
 // comments/replies are auto-calculated: max_posts × 50
 const calcReplies = (posts) => (Number(posts) || 0) * 50;
 
+// ── Scraper → Tool mapping (mirrors backend TOOL_SCRAPER_MAP) ────────────────
+const SCRAPER_TOOL_MAP = {
+  reddit: "scrapedo", spiceworks: "scrapedo", quora: "scrapedo",
+  edugeek: "scrapingbee",
+  stackexchange: "stackexchange", autodesk: "autodesk",
+  twitter: "getxapi", google_news: "scrappa", facebook: "scrapecreators",
+};
+const TOOL_NAMES = {
+  scrapedo: "ScrapeDo", scrapingbee: "ScrapingBee",
+  stackexchange: "StackExchange API", autodesk: "Autodesk LiQL API",
+  getxapi: "GetXAPI", scrappa: "Scrappa.co", scrapecreators: "ScrapeCreators",
+};
+
 // ── Scraper definitions — keywords come from the saved pool, not typed in modal ─
 const SCRAPER_DEFS = [
   {
@@ -147,7 +160,7 @@ const STATUS_META = {
 };
 
 const defaultCard = () => ({
-  status: "idle", taskId: null, totalItems: null, itemsProcessed: null,
+  status: "idle", taskIds: [], totalItems: null, itemsProcessed: null,
   lastRun: null, error: null, enabled: true,
 });
 
@@ -163,10 +176,16 @@ function loadCards() {
     const result = buildDefault();
     for (const key of Object.keys(result)) {
       if (saved[key]) {
+        const savedCard = { ...saved[key] };
+        if (savedCard.taskId && !savedCard.taskIds) {
+          savedCard.taskIds = [savedCard.taskId];
+          delete savedCard.taskId;
+        }
+        if (!savedCard.taskIds) savedCard.taskIds = [];
         result[key] = {
           ...result[key],
-          ...saved[key],
-          status: saved[key].status === "queued" ? "idle" : saved[key].status,
+          ...savedCard,
+          status: savedCard.status === "queued" ? "idle" : savedCard.status,
         };
       }
     }
@@ -308,51 +327,80 @@ const Scraping = () => {
   useEffect(() => {
     const id = setInterval(async () => {
       const active = Object.entries(cardsRef.current).filter(
-        ([, s]) => s.taskId && (s.status === "queued" || s.status === "running")
+        ([, s]) => s.taskIds?.length > 0 && (s.status === "queued" || s.status === "running")
       );
       if (!active.length) return;
       for (const [key, s] of active) {
-        try {
-          const res  = await apiFetch(`${API_BASE}/api/tasks/${s.taskId}`);
-          if (!res.ok) continue;
-          const task = await res.json();
-          const patch = { status: task.status };
-          if (task.finished_at) patch.lastRun = new Date(task.finished_at).toLocaleString();
-          if (task.result) {
-            patch.totalItems =
-              task.result.total_posts     ??
-              task.result.total_tweets    ??
-              task.result.total_articles  ??
-              task.result.total_questions ??
-              task.result.total_items     ??
-              cardsRef.current[key].totalItems;
-            if (task.result.newsletters_created != null)
-              patch.itemsProcessed = task.result.newsletters_created;
-          }
-          patch.error = task.status === "failed" ? (task.error || "Run failed") : null;
-          updateCard(key, patch);
+        let completedCount = 0;
+        let failedCount = 0;
+        let runningCount = 0;
+        let latestError = null;
+        let totalItems = 0;
+        let itemsProcessed = 0;
+        let lastFinishedAt = null;
 
-          if (!notifiedRef.current.has(s.taskId)) {
-            const name = SCRAPER_DEFS.find((d) => d.key === key)?.name || key;
+        for (const taskId of s.taskIds) {
+          try {
+            const res = await apiFetch(`${API_BASE}/api/tasks/${taskId}`);
+            if (!res.ok) continue;
+            const task = await res.json();
+
             if (task.status === "completed") {
-              notifiedRef.current.add(s.taskId);
-              addNotification({
-                title:   `${name} completed`,
-                message: patch.totalItems != null
-                  ? `${patch.totalItems.toLocaleString()} items extracted successfully`
-                  : "Collection completed successfully",
-                type: "success",
-              });
+              completedCount++;
+              if (task.result) {
+                totalItems +=
+                  task.result.total_posts ??
+                  task.result.total_tweets ??
+                  task.result.total_articles ??
+                  task.result.total_questions ??
+                  task.result.total_items ?? 0;
+                if (task.result.newsletters_created != null)
+                  itemsProcessed += task.result.newsletters_created;
+              }
+              if (task.finished_at) lastFinishedAt = task.finished_at;
             } else if (task.status === "failed") {
-              notifiedRef.current.add(s.taskId);
-              addNotification({
-                title:   `${name} failed`,
-                message: (task.error || "The collection failed — check logs for details").split("|||")[0],
-                type:    "error",
-              });
+              failedCount++;
+              latestError = task.error || "Run failed";
+            } else if (task.status === "queued" || task.status === "running") {
+              runningCount++;
             }
-          }
-        } catch (_) {}
+
+            if (!notifiedRef.current.has(taskId)) {
+              const name = SCRAPER_DEFS.find((d) => d.key === key)?.name || key;
+              if (task.status === "completed") {
+                notifiedRef.current.add(taskId);
+                addNotification({
+                  title:   `${name} keyword completed`,
+                  message: task.result?.total_posts ?? task.result?.total_items ?? "Done",
+                  type: "success",
+                });
+              } else if (task.status === "failed") {
+                notifiedRef.current.add(taskId);
+                addNotification({
+                  title:   `${name} keyword failed`,
+                  message: (task.error || "Failed — check logs").split("|||")[0],
+                  type:    "error",
+                });
+              }
+            }
+          } catch (_) {}
+        }
+
+        // Determine overall card status
+        const patch = {};
+        if (totalItems > 0) patch.totalItems = totalItems;
+        if (itemsProcessed > 0) patch.itemsProcessed = itemsProcessed;
+        if (runningCount > 0) {
+          patch.status = "running";
+        } else if (failedCount === s.taskIds.length) {
+          patch.status = "failed";
+          patch.error = latestError;
+        } else if (completedCount + failedCount === s.taskIds.length) {
+          patch.status = completedCount > 0 ? "completed" : "failed";
+          if (patch.status === "failed") patch.error = latestError;
+        }
+        if (lastFinishedAt) patch.lastRun = new Date(lastFinishedAt).toLocaleString();
+        updateCard(key, patch);
       }
     }, 3000);
     return () => clearInterval(id);
@@ -582,9 +630,11 @@ const Scraping = () => {
     if (isHardBlocked) return `Overall budget at ${budgetPct.toFixed(0)}% — increase in Cost Governance`;
     const b = scraperBlocks[key];
     if (b?.is_blocked) {
+      const toolKey = SCRAPER_TOOL_MAP[key] || key;
+      const toolName = TOOL_NAMES[toolKey] || toolKey;
       return b.no_budget
-        ? `No budget allocated for ${key} — set one in Cost Governance`
-        : `${key} budget limit reached (${b.pct?.toFixed(0)}%) — increase allocation in Cost Governance`;
+        ? `No budget allocated for ${toolName} — set one in Cost Governance`
+        : `${toolName} tool budget limit reached (${b.pct?.toFixed(0)}%) — increase allocation in Cost Governance`;
     }
     return "";
   };
@@ -719,7 +769,11 @@ const Scraping = () => {
           );
           const succeeded = results.filter((r) => r.status === "fulfilled");
           if (succeeded.length > 0)
-            updateCard("facebook", { status: "queued", taskId: succeeded[succeeded.length - 1].value, error: null });
+            updateCard("facebook", {
+              status: "queued",
+              taskIds: succeeded.map((r) => r.value),
+              error: null,
+            });
           showToast(
             `Facebook Groups: ${succeeded.length}/${pairs.length} job${pairs.length !== 1 ? "s" : ""} queued!`,
             succeeded.length === 0 ? "error" : "success"
@@ -742,7 +796,11 @@ const Scraping = () => {
           );
           const succeeded = results.filter((r) => r.status === "fulfilled");
           if (succeeded.length > 0)
-            updateCard(def.key, { status: "queued", taskId: succeeded[succeeded.length - 1].value, error: null });
+            updateCard(def.key, {
+              status: "queued",
+              taskIds: succeeded.map((r) => r.value),
+              error: null,
+            });
           showToast(
             succeeded.length === scraperKws.length
               ? `${def.name}: ${succeeded.length} job${succeeded.length !== 1 ? "s" : ""} queued!`
@@ -783,15 +841,20 @@ const Scraping = () => {
           })
         );
         let queued = 0;
+        const taskIdsByKey = {};
         setCards((prev) => {
           const next = { ...prev };
           results.forEach((r) => {
             if (r.status === "fulfilled") {
               const { key, taskId } = r.value;
-              next[key] = { ...next[key], status: "queued", taskId, error: null };
+              if (!taskIdsByKey[key]) taskIdsByKey[key] = [];
+              taskIdsByKey[key].push(taskId);
               queued++;
             }
           });
+          for (const [key, taskIds] of Object.entries(taskIdsByKey)) {
+            next[key] = { ...next[key], status: "queued", taskIds, error: null };
+          }
           return next;
         });
         showToast(`${queued}/${jobs.length} jobs queued!`);
@@ -976,9 +1039,13 @@ const Scraping = () => {
                     </Typography>
                   </Box>
                   <Box sx={{ textAlign: "right" }}>
-                    <Typography variant="caption" sx={{ color: C.textMuted }}>Task ID</Typography>
+                    <Typography variant="caption" sx={{ color: C.textMuted }}>Tasks</Typography>
                     <Typography variant="body2" sx={{ color: C.textMuted, fontWeight: 500, fontSize: "0.7rem" }}>
-                      {s.taskId ? s.taskId.slice(0, 8) + "…" : "—"}
+                      {s.taskIds?.length > 0
+                        ? s.taskIds.length === 1
+                          ? s.taskIds[0].slice(0, 8) + "…"
+                          : `${s.taskIds.length} jobs`
+                        : "—"}
                     </Typography>
                   </Box>
                 </Stack>

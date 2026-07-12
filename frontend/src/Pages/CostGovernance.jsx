@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../api";
 import {
   Box, Card, CardContent, Typography, Grid, LinearProgress,
@@ -25,9 +25,22 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const DISPLAY_EMAIL_THRESHOLD = 80;
 const DISPLAY_HARD_THRESHOLD  = 100;
 
-const SCRAPER_KEYS = [
-  "reddit", "edugeek", "stackexchange", "autodesk", "twitter", "google_news", "spiceworks", "quora", "facebook",
-];
+const TOOL_SCRAPER_MAP = {
+  scrapedo:       { name: "ScrapeDo",           scrapers: ["reddit", "spiceworks", "quora"] },
+  scrapingbee:    { name: "ScrapingBee",         scrapers: ["edugeek"] },
+  stackexchange:  { name: "StackExchange API",    scrapers: ["stackexchange"], free: true },
+  autodesk:       { name: "Autodesk LiQL API",    scrapers: ["autodesk"], free: true },
+  getxapi:        { name: "GetXAPI",              scrapers: ["twitter"] },
+  scrappa:        { name: "Scrappa.co",           scrapers: ["google_news"] },
+  scrapecreators: { name: "ScrapeCreators",       scrapers: ["facebook"] },
+};
+const TOOL_KEYS_RAW = Object.keys(TOOL_SCRAPER_MAP);
+const FREE_TOOLS = new Set(TOOL_KEYS_RAW.filter((k) => TOOL_SCRAPER_MAP[k].free));
+const PAID_TOOLS = TOOL_KEYS_RAW.filter((k) => !TOOL_SCRAPER_MAP[k].free);
+const TOOL_KEYS = [...PAID_TOOLS, ...FREE_TOOLS];
+const SCRAPER_TOOL = {};
+TOOL_KEYS.forEach((t) => TOOL_SCRAPER_MAP[t].scrapers.forEach((s) => { SCRAPER_TOOL[s] = t; }));
+
 const SCRAPER_LABELS = {
   reddit:        "Reddit",
   edugeek:       "EduGeek",
@@ -61,12 +74,13 @@ const LLM_PROVIDER_LABELS = {
   gemini:    "Gemini",
 };
 
-const ALLOC_KEY = "TrendSense_budget_alloc_v2";
+const ALLOC_KEY = "TrendSense_budget_alloc_v3";
 
 function defaultAllocations(total) {
-  const each = parseFloat((total / SCRAPER_KEYS.length).toFixed(2));
+  const each = parseFloat((total / PAID_TOOLS.length).toFixed(2));
   const alloc = {};
-  SCRAPER_KEYS.forEach((k) => { alloc[k] = each; });
+  PAID_TOOLS.forEach((k) => { alloc[k] = each; });
+  FREE_TOOLS.forEach((k) => { alloc[k] = 0; });
   return alloc;
 }
 
@@ -129,6 +143,7 @@ const CostGovernance = () => {
   const [budgetInput,   setBudgetInput]   = useState(1000);
   const [allocations,   setAllocations]   = useState({});
   const [allocError,    setAllocError]    = useState("");
+  const modalJustOpenedRef = useRef(false);
 
   const [emails,        setEmails]        = useState([]);
   const [emailInput,    setEmailInput]    = useState("");
@@ -173,17 +188,19 @@ const CostGovernance = () => {
   }, []);
 
   useEffect(() => {
-    // Guard: never overwrite user's in-progress edits while the modal is open.
-    // The 30-second background poll updates `data` and would otherwise reset
-    // every field the user has changed but not yet saved.
+    if (!modsModal) modalJustOpenedRef.current = false;
+  }, [modsModal]);
+
+  useEffect(() => {
     if (!data || modsModal) return;
+    if (modalJustOpenedRef.current) return;
     const total = data.budget_usd ?? 1000;
     setBudgetInput(total);
     const backendBudgets = data.scraper_budgets || {};
     const hasBackendData = Object.keys(backendBudgets).length > 0;
     if (hasBackendData) {
       const alloc = {};
-      SCRAPER_KEYS.forEach((k) => {
+      TOOL_KEYS.forEach((k) => {
         alloc[k] = backendBudgets[k]?.budget_usd ?? loadAllocations(total)[k] ?? 0;
       });
       setAllocations(alloc);
@@ -195,6 +212,7 @@ const CostGovernance = () => {
   const openModsModal = async () => {
     setAllocError("");
     setEmailInput("");
+    modalJustOpenedRef.current = true;
     setModsModal(true);
     try {
       const res = await apiFetch(`${API_BASE}/api/spending/alert-emails`);
@@ -217,17 +235,16 @@ const CostGovernance = () => {
 
   const scraperBudgets = data?.scraper_budgets || {};
 
-  const totalAllocated  = Object.values(allocations).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+  const totalAllocated  = PAID_TOOLS.reduce((s, k) => s + (parseFloat(allocations[k]) || 0), 0);
   const isOverBudget    = totalAllocated > budgetInput + 0.01;
-  const hasBelowSpend   = SCRAPER_KEYS.some((k) => {
-    const alloc = allocations[k] ?? 0;
+  const hasBelowSpend   = PAID_TOOLS.some((k) => {
+    const alloc = parseFloat(allocations[k]) || 0;
     const spent = scraperBudgets[k]?.spent_usd ?? 0;
     return alloc > 0 && alloc < spent;
   });
 
   const handleAllocChange = (key, raw) => {
-    const val  = Math.max(0, parseFloat(raw) || 0);
-    const next = { ...allocations, [key]: val };
+    const next = { ...allocations, [key]: raw };
     setAllocations(next);
     const total = Object.values(next).reduce((s, v) => s + (parseFloat(v) || 0), 0);
     if (total > budgetInput + 0.01) {
@@ -268,7 +285,9 @@ const CostGovernance = () => {
 
       const scraperBudgetRes = await apiFetch(`${API_BASE}/api/spending/scraper-budgets`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ budgets: allocations }),
+        body: JSON.stringify({ budgets: Object.fromEntries(
+          Object.entries(allocations).map(([k, v]) => [k, parseFloat(v) || 0])
+        ) }),
       });
       if (!scraperBudgetRes.ok) {
         const b = await scraperBudgetRes.json().catch(() => ({}));
@@ -491,30 +510,54 @@ const CostGovernance = () => {
                 {Object.keys(scraperBudgets).length === 0 ? (
                   <Box sx={{ py: 3, textAlign: "center" }}>
                     <Typography variant="body2" sx={{ color: C.textSub }}>
-                      No per-source budgets set yet.
+                      No per-tool budgets set yet.
                     </Typography>
                     <Typography variant="caption" sx={{ color: C.textMuted }}>
-                      Open Modifications to allocate budgets per source.
+                      Open Modifications to allocate budgets per tool.
                     </Typography>
                   </Box>
                 ) : (
-                  <Stack spacing={2.5}>
-                    {SCRAPER_KEYS.map((key) => {
-                      const info      = scraperBudgets[key];
-                      const allocUsd  = allocations[key] ?? info?.budget_usd ?? 0;
-                      const spentUsd  = info?.spent_usd ?? 0;
-                      const pct       = allocUsd > 0 ? Math.min((spentUsd / allocUsd) * 100, 100) : 0;
+                  <Stack spacing={2}>
+                    {TOOL_KEYS.map((toolKey) => {
+                      const tool     = TOOL_SCRAPER_MAP[toolKey];
+                      const isFree   = tool.free;
+                      const info     = scraperBudgets[toolKey];
+                      const allocUsd = parseFloat(allocations[toolKey]) || info?.budget_usd || 0;
+                      const spentUsd = info?.spent_usd ?? 0;
+                      const pct      = allocUsd > 0 ? Math.min((spentUsd / allocUsd) * 100, 100) : 0;
                       const isBlocked = info?.is_blocked ?? false;
                       const isWarning = info?.is_warning ?? false;
                       const barColor  = isBlocked ? "#ef4444" : isWarning ? "#f97316" : "#3b82f6";
 
+                      if (isFree) {
+                        return (
+                          <Box key={toolKey}>
+                            <Box sx={{ display: "flex", justifyContent: "space-between",
+                              alignItems: "center", mb: 0.5, flexWrap: "wrap", gap: 0.5 }}>
+                              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                <Typography variant="body2" sx={{ color: C.text, fontWeight: 600 }}>
+                                  {tool.name}
+                                </Typography>
+                                <Chip label="FREE" size="small"
+                                  sx={{ bgcolor: "#10b98120", color: "#10b981", fontSize: "0.6rem", height: 18 }} />
+                              </Box>
+                            </Box>
+                            {tool.scrapers.map((s) => (
+                              <Typography key={s} variant="caption" sx={{ color: C.textMuted, fontSize: "0.68rem", display: "block", ml: 2 }}>
+                                {SCRAPER_LABELS[s] || s}
+                              </Typography>
+                            ))}
+                          </Box>
+                        );
+                      }
+
                       return (
-                        <Box key={key}>
+                        <Box key={toolKey}>
                           <Box sx={{ display: "flex", justifyContent: "space-between",
-                            alignItems: "center", mb: 0.8, flexWrap: "wrap", gap: 0.5 }}>
+                            alignItems: "center", mb: 0.5, flexWrap: "wrap", gap: 0.5 }}>
                             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                               <Typography variant="body2" sx={{ color: C.text, fontWeight: 600 }}>
-                                {SCRAPER_LABELS[key]}
+                                {tool.name}
                               </Typography>
                               {isBlocked && (
                                 <Chip label="BLOCKED" size="small"
@@ -536,8 +579,23 @@ const CostGovernance = () => {
                           </Box>
                           <LinearProgress variant="determinate"
                             value={allocUsd > 0 ? pct : 0}
-                            sx={{ height: 7, borderRadius: 4, bgcolor: C.border,
+                            sx={{ height: 7, borderRadius: 4, bgcolor: C.border, mb: 0.5,
                               "& .MuiLinearProgress-bar": { bgcolor: barColor } }} />
+                          {tool.scrapers.map((s) => {
+                            const sInfo     = scraperBudgets[s];
+                            const sSpent    = sInfo?.spent_usd ?? 0;
+                            const sPct      = allocUsd > 0 ? Math.min((sSpent / allocUsd) * 100, 100) : 0;
+                            return (
+                              <Box key={s} sx={{ display: "flex", justifyContent: "space-between", ml: 2, mb: 0.2 }}>
+                                <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.68rem" }}>
+                                  {SCRAPER_LABELS[s] || s}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.68rem" }}>
+                                  {fmt(sSpent)} ({sPct.toFixed(1)}%)
+                                </Typography>
+                              </Box>
+                            );
+                          })}
                         </Box>
                       );
                     })}
@@ -546,8 +604,8 @@ const CostGovernance = () => {
 
                 <Box sx={{ mt: 3, p: 1.5, bgcolor: C.cardInner, borderRadius: 2, border: `1px solid ${C.border}` }}>
                   <Typography variant="caption" sx={{ color: C.textMuted }}>
-                    ℹ️ At <strong style={{ color: "#fde68a" }}>80%</strong> of source budget — warning email sent.
-                    At <strong style={{ color: "#fca5a5" }}>100%</strong> — that source is blocked.
+                    ℹ️ At <strong style={{ color: "#fde68a" }}>80%</strong> of tool budget — warning email sent.
+                    At <strong style={{ color: "#fca5a5" }}>97%</strong> — all scrapers using that tool are blocked.
                   </Typography>
                 </Box>
               </CardContent>
@@ -661,6 +719,7 @@ const CostGovernance = () => {
           <TextField
             fullWidth label="Monthly Budget (USD)" type="number"
             value={budgetInput}
+            onFocus={(e) => e.target.select()}
             onChange={(e) => {
               const val = parseFloat(e.target.value) || 0;
               setBudgetInput(val);
@@ -677,7 +736,9 @@ const CostGovernance = () => {
                 "& fieldset": { borderColor: C.border },
                 "&:hover fieldset": { borderColor: "#3b82f6" },
                 "&.Mui-focused fieldset": { borderColor: "#3b82f6" } },
-              "& .MuiInputBase-input": { color: C.text } }}
+              "& .MuiInputBase-input": { color: C.text,
+                "&::-webkit-outer-spin-button, &::-webkit-inner-spin-button": { WebkitAppearance: "none", margin: 0 },
+                "&[type=number]": { MozAppearance: "textfield" } } }}
             InputLabelProps={{ style: { color: C.textSub } }}
             InputProps={{ startAdornment: <Typography sx={{ color: C.textMuted, mr: 0.5 }}>$</Typography> }}
           />
@@ -733,64 +794,95 @@ const CostGovernance = () => {
             )}
           </Typography>
 
-          <Stack spacing={1.5} sx={{ mb: 1 }}>
-            {SCRAPER_KEYS.map((key) => {
-              const allocVal    = allocations[key] ?? 0;
-              const pctOfTotal  = budgetInput > 0 ? Math.min((allocVal / budgetInput) * 100, 100) : 0;
-              const info        = scraperBudgets[key];
-              const spentPct    = info?.pct ?? 0;
-              const spentUsd    = info?.spent_usd ?? 0;
-              const noBudget    = info?.no_budget !== false && allocVal <= 0;
-              const belowSpend  = allocVal > 0 && allocVal < spentUsd;
-              const fieldError  = belowSpend;
-              const barColor    = info?.is_blocked ? "#ef4444" : info?.is_warning ? "#f97316" : "#3b82f6";
+          <Stack spacing={0} sx={{ mb: 1 }}>
+            {TOOL_KEYS.map((toolKey) => {
+              const tool       = TOOL_SCRAPER_MAP[toolKey];
+              const isFree     = tool.free;
+              const allocVal   = allocations[toolKey] ?? 0;
+              const pctOfTotal = budgetInput > 0 ? Math.min(((parseFloat(allocVal) || 0) / budgetInput) * 100, 100) : 0;
+              const info       = scraperBudgets[toolKey];
+              const spentPct   = info?.pct ?? 0;
+              const spentUsd   = info?.spent_usd ?? 0;
+              const belowSpend = (parseFloat(allocVal) || 0) > 0 && (parseFloat(allocVal) || 0) < spentUsd;
+              const fieldError = belowSpend;
+              const barColor   = info?.is_blocked ? "#ef4444" : info?.is_warning ? "#f97316" : "#3b82f6";
+              const scraperNames = tool.scrapers.map((s) => SCRAPER_LABELS[s] || s).join(", ");
 
               return (
-                <Box key={key}>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: belowSpend ? 0.2 : 0.5 }}>
-                    <Typography variant="body2" sx={{ color: noBudget ? "#ef4444" : C.text, width: 120, flexShrink: 0, fontSize: "0.8rem", fontWeight: noBudget ? 700 : 400 }}>
-                      {SCRAPER_LABELS[key]}
-                      {noBudget && <Typography component="span" sx={{ color: "#ef4444", fontSize: "0.6rem", ml: 0.5 }}>NO BUDGET</Typography>}
-                    </Typography>
-                    <TextField
-                      size="small" type="number"
-                      value={allocVal}
-                      onChange={(e) => handleAllocChange(key, e.target.value)}
-                      inputProps={{ min: 0, step: 1 }}
-                      error={fieldError}
-                      sx={{ width: 110, flexShrink: 0,
-                        "& .MuiOutlinedInput-root": { color: C.text, bgcolor: C.inputBg,
-                          "& fieldset": { borderColor: fieldError ? "#ef4444" : isOverBudget ? "#ef4444" : C.border },
-                          "&:hover fieldset": { borderColor: fieldError ? "#ef4444" : "#3b82f6" },
-                          "&.Mui-focused fieldset": { borderColor: fieldError ? "#ef4444" : "#3b82f6" } },
-                        "& .MuiInputBase-input": { color: C.text, fontSize: "0.8rem" } }}
-                      InputProps={{ startAdornment: <Typography sx={{ color: C.textMuted, mr: 0.3, fontSize: "0.8rem" }}>$</Typography> }}
-                    />
-                    <Box sx={{ flex: 1 }}>
-                      <LinearProgress variant="determinate" value={pctOfTotal}
-                        sx={{ height: 5, borderRadius: 3, bgcolor: C.border, mb: 0.4,
-                          "& .MuiLinearProgress-bar": { bgcolor: "#3b82f640" } }} />
-                      {info && (
-                        <LinearProgress variant="determinate" value={Math.min(spentPct, 100)}
-                          sx={{ height: 5, borderRadius: 3, bgcolor: C.border,
-                            "& .MuiLinearProgress-bar": { bgcolor: barColor } }} />
-                      )}
-                    </Box>
-                    <Box sx={{ width: 52, textAlign: "right", flexShrink: 0 }}>
-                      <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.68rem", display: "block" }}>
-                        {pctOfTotal.toFixed(0)}% of total
+                <Box key={toolKey} sx={{ py: 1.5, borderBottom: `1px solid ${C.border}` }}>
+                  {isFree ? (
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                      <Box sx={{ flex: 1 }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <Typography variant="body2" sx={{ color: C.text, fontWeight: 600, fontSize: "0.85rem" }}>
+                            {tool.name}
+                          </Typography>
+                          <Chip label="FREE" size="small" sx={{ bgcolor: "#10b98120", color: "#10b981", fontSize: "0.65rem", height: 18 }} />
+                        </Box>
+                        <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.68rem", display: "block", mt: 0.3, ml: 0.5 }}>
+                          {scraperNames}
+                        </Typography>
+                      </Box>
+                      <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.68rem" }}>
+                        No budget needed
                       </Typography>
-                      {info && (
-                        <Typography variant="caption" sx={{ color: barColor, fontSize: "0.68rem", display: "block" }}>
-                          {spentPct.toFixed(0)}% spent
+                    </Box>
+                  ) : (
+                    <>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: belowSpend ? 0.2 : 0.5 }}>
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <Typography variant="body2" sx={{ color: C.text, fontWeight: 600, fontSize: "0.85rem" }}>
+                              {tool.name}
+                            </Typography>
+                            {info?.is_blocked && (
+                              <Chip label="BLOCKED" size="small"
+                                sx={{ bgcolor: "#ef444420", color: "#ef4444", fontSize: "0.6rem", height: 18 }} />
+                            )}
+                            {!info?.is_blocked && info?.is_warning && (
+                              <Chip label="WARNING" size="small"
+                                sx={{ bgcolor: "#f9731620", color: "#f97316", fontSize: "0.6rem", height: 18 }} />
+                            )}
+                          </Box>
+                          <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.65rem", display: "block", mt: 0.2, ml: 0.5 }}>
+                            {scraperNames}
+                          </Typography>
+                        </Box>
+                        <TextField
+                          size="small" type="number"
+                          value={allocVal}
+                          onChange={(e) => handleAllocChange(toolKey, e.target.value)}
+                          onFocus={(e) => e.target.select()}
+                          onBlur={(e) => { if (e.target.value === "" || e.target.value === "$") handleAllocChange(toolKey, "0"); }}
+                          inputProps={{ min: 0, step: 1 }}
+                          error={fieldError}
+                          sx={{ width: 110, flexShrink: 0,
+                            "& .MuiOutlinedInput-root": { color: C.text, bgcolor: C.inputBg,
+                              "& fieldset": { borderColor: fieldError ? "#ef4444" : isOverBudget ? "#ef4444" : C.border },
+                              "&:hover fieldset": { borderColor: fieldError ? "#ef4444" : "#3b82f6" },
+                              "&.Mui-focused fieldset": { borderColor: fieldError ? "#ef4444" : "#3b82f6" } },
+                            "& .MuiInputBase-input": { color: C.text, fontSize: "0.8rem",
+                              "&::-webkit-outer-spin-button, &::-webkit-inner-spin-button": { WebkitAppearance: "none", margin: 0 },
+                              "&[type=number]": { MozAppearance: "textfield" } } }}
+                          InputProps={{ startAdornment: <Typography sx={{ color: C.textMuted, mr: 0.3, fontSize: "0.8rem" }}>$</Typography> }}
+                        />
+                        <Box sx={{ width: 52, textAlign: "right", flexShrink: 0 }}>
+                          <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.68rem", display: "block" }}>
+                            {pctOfTotal.toFixed(0)}% of total
+                          </Typography>
+                          {info && (
+                            <Typography variant="caption" sx={{ color: barColor, fontSize: "0.68rem", display: "block" }}>
+                              {spentPct.toFixed(0)}% spent
+                            </Typography>
+                          )}
+                        </Box>
+                      </Box>
+                      {belowSpend && (
+                        <Typography sx={{ color: "#ef4444", fontSize: "0.68rem", ml: "130px", mb: 0.5 }}>
+                          Min ${spentUsd.toFixed(4)} (already spent this month)
                         </Typography>
                       )}
-                    </Box>
-                  </Box>
-                  {belowSpend && (
-                    <Typography sx={{ color: "#ef4444", fontSize: "0.68rem", ml: "130px", mb: 0.5 }}>
-                      Min ${spentUsd.toFixed(4)} (already spent this month)
-                    </Typography>
+                    </>
                   )}
                 </Box>
               );
@@ -799,8 +891,9 @@ const CostGovernance = () => {
 
           <Box sx={{ mb: 3, p: 1.5, bgcolor: C.cardInner, borderRadius: 2, border: `1px solid ${C.border}` }}>
             <Typography variant="caption" sx={{ color: C.textMuted }}>
-              ℹ️ Sources with <strong style={{ color: "#ef4444" }}>$0 allocation are blocked</strong> and cannot run.
-              Each allocated source warns at 77% and hard-blocks at 97% independently of the overall budget.
+              ℹ️ Free tools (StackExchange API, Autodesk LiQL API) need no budget.
+              Paid tools with <strong style={{ color: "#ef4444" }}>$0 allocation are blocked</strong> and their scrapers cannot run.
+              Each tool warns at 77% and hard-blocks at 97%.
               Budget cannot be set below current month spend.
             </Typography>
           </Box>
