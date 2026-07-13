@@ -21,17 +21,20 @@ import { useAppTheme }    from "../AppThemeContext";
 const API_BASE    = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const SIDEBAR_KEY = "TrendSense_newsletter_sidebar_open";
 
-// ── Static newsletter copy — update these as needed ───────────────────────────
-const NEWSLETTER_QUOTE_LINE1 = "By relying solely on their cloud providers for data security, many companies unknowingly compromise their operations.";
-const NEWSLETTER_QUOTE_LINE2 = "From data loss to costly downtime, misunderstandings about who is responsible for data protection can have severe consequences.";
-const CTA_URL = "https://cloudsfer.com"; // TODO: replace with real URL
+// ── Static newsletter copy — Tzunami branding ────────────────────────────────
+const CTA_URL = "https://cloudsfer.com/contact-us/";
 
-const SOCIAL_ICONS = [
-  { label: "f",  bg: "#1877F2", href: "https://www.facebook.com/cloudsfer?locale=he_IL", title: "Facebook",  fontSize: "1rem",   fontWeight: "bold" },
-  { label: "𝕏",  bg: "#000000", href: "https://x.com/Cloudsfer",                         title: "X",         fontSize: "0.95rem", fontWeight: "bold" },
-  { label: "🔗", bg: "#2DBDAD", href: "https://cloudsfer.com/",                           title: "Website",   fontSize: "0.85rem", fontWeight: "normal" },
-  { label: "in", bg: "#0077B5", href: "https://www.linkedin.com/company/cloudsfer/",      title: "LinkedIn",  fontSize: "0.8rem",  fontWeight: "bold" },
+const SOCIAL_LINKS = [
+  { name: "Facebook", url: "https://www.facebook.com/TzunamiDeployer?locale=he_IL", icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-facebook-48.png" },
+  { name: "X",        url: "https://twitter.com/tzunami",                           icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-twitter-48.png" },
+  { name: "Website",  url: "https://tzunami.com/",                                  icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-link-48.png" },
+  { name: "LinkedIn", url: "https://www.linkedin.com/company/126996/admin/feed/posts/", icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-linkedin-48.png" },
 ];
+
+const FOOTER_COPYRIGHT = "Copyright ©️ 2024 Tzunami Inc. All rights reserved.";
+const FOOTER_ADDRESS   = "support@tzunami.com";
+const FOOTER_PREFS_URL = "#";
+const FOOTER_UNSUB_URL = "#";
 
 const PROVIDER_COLORS = {
   openai:    "#10a37f",
@@ -39,79 +42,249 @@ const PROVIDER_COLORS = {
   gemini:    "#4285f4",
 };
 
-// ── Build inline-styled HTML for Gmail paste ──────────────────────────────────
+// ── Build Mailchimp-compatible inline-styled HTML for Gmail paste ──────────────
 function buildGmailHtml(newsletter) {
   const c        = newsletter?.content || {};
-  const question = String(c.question || c.headline || "What is really happening?");
-  const answer   = String(c.answer   || c.analyst_note || "");
-  const rawTerm  = String(c.cta_term || c.keyword || "");
-  const ctaTerm  = rawTerm.replace(/\s+support\s*$/i, "").trim();
-  const ctaLabel = ctaTerm
-    ? `→ Get Reliable ${ctaTerm.charAt(0).toUpperCase() + ctaTerm.slice(1)} Support with Cloudsfer`
-    : "→ Discover Cloudsfer";
+  const hook     = String(c.hook_paragraph || "");
+  const stat     = String(c.stat_paragraph || "");
+  const source   = String(c.source_name || "");
+  const sourceUrl= String(c.source_url || "#");
+  const highlight= String(c.highlight_stat || "");
+  const context  = String(c.context_paragraph || "");
+  const solution = String(c.solution_paragraph || "");
+  const ctaLabel = String(c.cta_label || "👉 Request a Free Demo");
+  const imageData= String(c.image_data || "");
 
   const esc = (s) => s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+  // Replace **stat** in stat_paragraph with red-highlighted version
+  const highlightStat = (text, stat) => {
+    if (!stat) return `<span style="font-size:18px">${esc(text)}</span>`;
+    const escaped = stat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${escaped})`, 'i'));
+    return parts.map(p => {
+      if (p.toLowerCase() === stat.toLowerCase()) {
+        return `<span style="color:#B22222;font-weight:bold;">${esc(p)}</span>`;
+      }
+      return `<span style="font-size:18px">${esc(p)}</span>`;
+    }).join('');
+  };
+
+  // Build social icons HTML
+  const socialIconsHtml = SOCIAL_LINKS.map(s => `
+    <td align="center" valign="top" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+      <!--[if mso]><td align="center" valign="top"><![endif]-->
+      <table align="left" border="0" cellpadding="0" cellspacing="0" style="display:inline;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;">
+        <tr>
+          <td valign="top" style="padding-right:10px;padding-bottom:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+              <tr>
+                <td align="left" valign="middle" style="padding-top:5px;padding-right:10px;padding-bottom:5px;padding-left:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                  <table align="left" border="0" cellpadding="0" cellspacing="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;">
+                    <tr>
+                      <td align="center" valign="middle" width="24" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                        <a href="${esc(s.url)}" target="_blank" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;"><img src="${esc(s.icon)}" alt="${esc(s.name)}" style="display:block;border:0;height:auto;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;" height="24" width="24"></a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+      <!--[if mso]></td><![endif]-->
+    </td>`).join('');
+
+  // Image section (only if imageData exists)
+  const imageSection = imageData
+    ? `<p dir="ltr" style="color:#222222;margin:10px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;"><img src="data:image/png;base64,${imageData}" style="border:0;width:600px;height:auto;margin:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;" width="600"></p>`
+    : '';
+
   return `
-<div style="background:#ffffff;max-width:600px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;padding:32px 40px;color:#222222;">
-
-  <hr style="border:none;border-top:2px solid #dddddd;margin:0 0 28px 0;" />
-
-  <p style="color:#888888;font-size:13px;margin:0 0 10px 0;">We've all seen the posts in Google News:</p>
-
-  <h2 style="color:#c0392b;font-size:22px;font-weight:bold;line-height:1.35;margin:0 0 18px 0;">
-    ${esc(question)}
-  </h2>
-
-  <p style="color:#555555;font-size:16px;margin:0 0 8px 0;">But what if it's not?</p>
-
-  <p style="color:#222222;font-size:16px;margin:0 0 20px 0;">
-    Cloudsfer provides a definitive
-    <span style="color:#c0392b;font-weight:bold;">yes</span>
-  </p>
-
-  <p style="color:#333333;font-size:15px;line-height:1.7;margin:0 0 36px 0;">
-    ${esc(answer)}
-  </p>
-
-  <div style="text-align:center;margin:0 0 28px 0;">
-    <a href="${CTA_URL}" target="_blank" rel="noopener noreferrer"
-       style="background:#2DBDAD;color:#ffffff;padding:14px 40px;text-decoration:none;border-radius:50px;font-size:15px;font-weight:bold;display:inline-block;">
-      ${ctaLabel}
-    </a>
-  </div>
-
-  <div style="background:#E8923A;padding:14px 20px;margin:0 0 24px 0;text-align:center;border-radius:2px;">
-    <table role="presentation" style="margin:0 auto;border-collapse:collapse;">
-      <tr>
-        <td style="padding:0 6px;">
-          <a href="https://www.facebook.com/cloudsfer?locale=he_IL" target="_blank" rel="noopener noreferrer" style="display:inline-block;width:36px;height:36px;border-radius:50%;background:#1877F2;text-align:center;line-height:36px;color:#ffffff;font-weight:bold;font-size:16px;text-decoration:none;">f</a>
-        </td>
-        <td style="padding:0 6px;">
-          <a href="https://x.com/Cloudsfer" target="_blank" rel="noopener noreferrer" style="display:inline-block;width:36px;height:36px;border-radius:50%;background:#000000;text-align:center;line-height:36px;color:#ffffff;font-weight:bold;font-size:14px;text-decoration:none;">&#120143;</a>
-        </td>
-        <td style="padding:0 6px;">
-          <a href="https://cloudsfer.com/" target="_blank" rel="noopener noreferrer" style="display:inline-block;width:36px;height:36px;border-radius:50%;background:#2DBDAD;text-align:center;line-height:36px;color:#ffffff;font-size:16px;text-decoration:none;">&#128279;</a>
-        </td>
-        <td style="padding:0 6px;">
-          <a href="https://www.linkedin.com/company/cloudsfer/" target="_blank" rel="noopener noreferrer" style="display:inline-block;width:36px;height:36px;border-radius:50%;background:#0077B5;text-align:center;line-height:36px;color:#ffffff;font-weight:bold;font-size:12px;text-decoration:none;">in</a>
-        </td>
-      </tr>
-    </table>
-  </div>
-
-  <div style="background:#f0f0f0;padding:20px 28px;border-radius:4px;text-align:center;">
-    <p style="font-style:italic;color:#555555;font-size:14px;line-height:1.7;margin:0 0 8px 0;">
-      ${esc(NEWSLETTER_QUOTE_LINE1)}
-    </p>
-    <p style="font-style:italic;color:#555555;font-size:14px;line-height:1.7;margin:0;">
-      ${esc(NEWSLETTER_QUOTE_LINE2)}
-    </p>
-  </div>
-
-  <hr style="border:none;border-top:1px solid #dddddd;margin:28px 0 0 0;" />
-
-</div>`.trim();
+<!doctype html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+  <head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${esc(newsletter.title || 'Tzunami Newsletter')}</title>
+    <style type="text/css">
+      p{margin:10px 0;padding:0;}
+      table{border-collapse:collapse;}
+      h1,h2,h3,h4,h5,h6{display:block;margin:0;padding:0;}
+      img,a img{border:0;height:auto;outline:none;text-decoration:none;}
+      body,#bodyTable,#bodyCell{height:100%;margin:0;padding:0;width:100%;}
+      .mcnPreviewText{display:none !important;}
+      #outlook a{padding:0;}
+      img{-ms-interpolation-mode:bicubic;}
+      table{mso-table-lspace:0pt;mso-table-rspace:0pt;}
+      .ReadMsgBody{width:100%;}
+      .ExternalClass{width:100%;}
+      p,a,li,td,blockquote{mso-line-height-rule:exactly;}
+      a[href^=tel],a[href^=sms]{color:inherit;cursor:default;text-decoration:none;}
+      p,a,li,td,body,table,blockquote{-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;}
+      .ExternalClass,.ExternalClass p,.ExternalClass td,.ExternalClass div,.ExternalClass span,.ExternalClass font{line-height:100%;}
+      a[x-apple-data-detectors]{color:inherit !important;text-decoration:none !important;font-size:inherit !important;font-family:inherit !important;font-weight:inherit !important;line-height:inherit !important;}
+      .templateContainer{max-width:600px !important;}
+      a.mcnButton{display:block;}
+      .mcnImage,.mcnRetinaImage{vertical-align:bottom;}
+      .mcnTextContent{word-break:break-word;}
+      .mcnTextContent img{height:auto !important;}
+      .mcnDividerBlock{table-layout:fixed !important;}
+      h1{color:#222222;font-family:Helvetica;font-size:40px;font-style:normal;font-weight:bold;line-height:150%;letter-spacing:normal;text-align:left;}
+      h2{color:#222222;font-family:Helvetica;font-size:28px;font-style:normal;font-weight:bold;line-height:150%;letter-spacing:normal;text-align:left;}
+      h3{color:#444444;font-family:Helvetica;font-size:22px;font-style:normal;font-weight:bold;line-height:150%;letter-spacing:normal;text-align:left;}
+      h4{color:#949494;font-family:Georgia;font-size:20px;font-style:italic;font-weight:normal;line-height:125%;letter-spacing:normal;text-align:left;}
+      #templateHeader{background-color:#F7F7F7;background-image:none;background-repeat:no-repeat;background-position:50% 50%;background-size:cover;border-top:0;border-bottom:0;padding-top:0px;padding-bottom:0px;}
+      .headerContainer{background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;}
+      .headerContainer .mcnTextContent,.headerContainer .mcnTextContent p{color:#757575;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;}
+      .headerContainer .mcnTextContent a,.headerContainer .mcnTextContent p a{color:#007C89;font-weight:normal;text-decoration:underline;}
+      #templateBody{background-color:#FFFFFF;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:66px;padding-bottom:66px;}
+      .bodyContainer{background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;}
+      .bodyContainer .mcnTextContent,.bodyContainer .mcnTextContent p{color:#757575;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;}
+      .bodyContainer .mcnTextContent a,.bodyContainer .mcnTextContent p a{color:#007C89;font-weight:normal;text-decoration:underline;}
+      #templateFooter{background-color:#333333;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0px;padding-bottom:0px;}
+      .footerContainer{background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;}
+      .footerContainer .mcnTextContent,.footerContainer .mcnTextContent p{color:#FFFFFF;font-family:Helvetica;font-size:12px;line-height:150%;text-align:center;}
+      .footerContainer .mcnTextContent a,.footerContainer .mcnTextContent p a{color:#FFFFFF;font-weight:normal;text-decoration:underline;}
+      @media only screen and (min-width:768px){.templateContainer{width:600px !important;}}
+      @media only screen and (max-width:480px){body,table,td,p,a,li,blockquote{-webkit-text-size-adjust:none !important;}}
+      @media only screen and (max-width:480px){body{width:100% !important;min-width:100% !important;}}
+      @media only screen and (max-width:480px){.mcnRetinaImage{max-width:100% !important;}}
+      @media only screen and (max-width:480px){.mcnImage{width:100% !important;}}
+      @media only screen and (max-width:480px){.mcnTextContent,.mcnBoxedTextContentColumn{padding-right:18px !important;padding-left:18px !important;}}
+    </style>
+  </head>
+  <body style="height:100%;margin:0;padding:0;width:100%;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+    <span class="mcnPreviewText" style="display:none;font-size:0px;line-height:0px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;visibility:hidden;mso-hide:all;">${esc(hook.substring(0, 150))}</span>
+    <center>
+      <table align="center" border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" id="bodyTable" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;height:100%;margin:0;padding:0;width:100%;">
+        <tr>
+          <td align="center" valign="top" id="bodyCell" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;height:100%;margin:0;padding:0;width:100%;">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+              <!-- HEADER -->
+              <tr>
+                <td align="center" valign="top" id="templateHeader" style="background:#F7F7F7 none no-repeat 50% 50%/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:#F7F7F7;background-image:none;background-repeat:no-repeat;background-position:50% 50%;background-size:cover;border-top:0;border-bottom:0;padding-top:0px;padding-bottom:0px;">
+                  <!--[if (gte mso 9)|(IE)]><table align="center" border="0" cellspacing="0" cellpadding="0" width="600" style="width:600px;"><tr><td align="center" valign="top" width="600" style="width:600px;"><![endif]-->
+                  <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" class="templateContainer" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;max-width:600px !important;">
+                    <tr>
+                      <td valign="top" class="headerContainer" style="background:transparent none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;"></td>
+                    </tr>
+                  </table>
+                  <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
+                </td>
+              </tr>
+              <!-- BODY -->
+              <tr>
+                <td align="center" valign="top" id="templateBody" style="background:#FFFFFF none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:#FFFFFF;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:66px;padding-bottom:66px;">
+                  <!--[if (gte mso 9)|(IE)]><table align="center" border="0" cellspacing="0" cellpadding="0" width="600" style="width:600px;"><tr><td align="center" valign="top" width="600" style="width:600px;"><![endif]-->
+                  <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" class="templateContainer" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;max-width:600px !important;">
+                    <tr>
+                      <td valign="top" class="bodyContainer" style="background:transparent none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;">
+                        <!-- Text Block -->
+                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                          <tr>
+                            <td valign="top" style="padding-top:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                              <table align="left" border="0" cellpadding="0" cellspacing="0" style="max-width:100%;min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;" width="100%" class="mcnTextContentContainer">
+                                <tr>
+                                  <td valign="top" class="mcnTextContent" style="padding:0px 18px 9px;color:#222222;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;word-break:break-word;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;">
+                                    ${imageSection}
+                                    ${hook ? `<p dir="ltr" style="color:#222222;margin:10px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;"><span style="font-size:18px">${esc(hook)}</span></p>` : ''}
+                                    ${stat ? `<p dir="ltr" style="color:#222222;margin:10px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;">${highlightStat(stat, highlight)}</p>` : ''}
+                                    ${context ? `<p dir="ltr" style="color:#222222;margin:10px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;"><span style="font-size:18px">${esc(context)}</span></p>` : ''}
+                                    ${solution ? `<p dir="ltr" style="color:#222222;margin:10px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;"><span style="font-size:18px">${esc(solution)}</span></p>` : ''}
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                        <!-- CTA Button -->
+                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                          <tr>
+                            <td style="padding-top:0;padding-right:18px;padding-bottom:18px;padding-left:18px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;" valign="top" align="center">
+                              <table border="0" cellpadding="0" cellspacing="0" style="border-collapse:separate !important;border-radius:26px;background-color:#2BAADF;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                                <tr>
+                                  <td align="center" valign="middle" style="font-family:Arial;font-size:16px;padding:18px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                                    <a class="mcnButton" title="${esc(ctaLabel)}" href="${esc(CTA_URL)}" target="_blank" style="font-weight:bold;letter-spacing:normal;line-height:100%;text-align:center;text-decoration:none;color:#FFFFFF;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;display:block;">${esc(ctaLabel)}</a>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                        <!-- Social Bar -->
+                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                          <tr>
+                            <td align="center" valign="top" style="padding:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;background-color:#31AFE2;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                                <tr>
+                                  <td align="center" valign="top" style="padding-top:9px;padding-right:9px;padding-left:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                                    <table align="center" border="0" cellpadding="0" cellspacing="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                                      <tr>
+                                        ${socialIconsHtml}
+                                      </tr>
+                                    </table>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                        <!-- Divider -->
+                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;table-layout:fixed !important;">
+                          <tr>
+                            <td style="min-width:100%;padding:18px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                              <table class="mcnDividerContent" border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                                <tr><td style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;"><span></span></td></tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
+                  <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
+                </td>
+              </tr>
+              <!-- FOOTER -->
+              <tr>
+                <td align="center" valign="top" id="templateFooter" style="background:#333333 none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:#333333;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0px;padding-bottom:0px;">
+                  <!--[if (gte mso 9)|(IE)]><table align="center" border="0" cellspacing="0" cellpadding="0" width="600" style="width:600px;"><tr><td align="center" valign="top" width="600" style="width:600px;"><![endif]-->
+                  <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" class="templateContainer" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;max-width:600px !important;">
+                    <tr>
+                      <td valign="top" class="footerContainer" style="background:transparent none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;">
+                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                          <tr>
+                            <td valign="top" style="padding-top:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
+                              <table align="left" border="0" cellpadding="0" cellspacing="0" style="max-width:100%;min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;" width="100%">
+                                <tr>
+                                  <td valign="top" style="padding-top:0;padding-right:18px;padding-bottom:9px;padding-left:18px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;word-break:break-word;color:#FFFFFF;font-family:Helvetica;font-size:12px;line-height:150%;text-align:center;">
+                                    <em>${esc(FOOTER_COPYRIGHT)}</em><br><br>
+                                    <strong>Our mailing address is:</strong><br>
+                                    ${esc(FOOTER_ADDRESS)}<br><br>
+                                    Want to change how you receive these emails?<br>
+                                    You can <a href="${esc(FOOTER_PREFS_URL)}" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;color:#FFFFFF;font-weight:normal;text-decoration:underline;">update your preferences</a> or <a href="${esc(FOOTER_UNSUB_URL)}" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;color:#FFFFFF;font-weight:normal;text-decoration:underline;">unsubscribe from this list</a>.
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
+                  <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </center>
+  </body>
+</html>`.trim();
 }
 
 // ── Copy button — icon only, copies rich HTML for Gmail ──────────────────────
@@ -160,14 +333,36 @@ const CopyButton = ({ newsletter }) => {
   );
 };
 
-// ── Newsletter preview — white email-style template ───────────────────────────
+// ── Newsletter preview — Tzunami branded email-style template ──────────────────
 const RenderedNewsletter = ({ newsletter }) => {
   const c = newsletter.content || {};
 
-  // Support both new format (question/answer) and old format (headline/analyst_note)
+  // Support both new format (4 paragraphs) and old format (headline/analyst_note/sections)
+  const hook      = c.hook_paragraph || null;
+  const stat      = c.stat_paragraph || null;
+  const source    = c.source_name || "";
+  const sourceUrl = c.source_url || "#";
+  const highlight = c.highlight_stat || "";
+  const context   = c.context_paragraph || null;
+  const solution  = c.solution_paragraph || null;
+  const ctaLabel  = c.cta_label || "👉 Request a Free Demo";
+  const imageData = c.image_data || "";
+
+  // Legacy format detection
   const question = c.question || c.headline || null;
   const answer   = c.answer   || c.analyst_note || null;
-  const isLegacy = !c.question && (c.headline || c.sections?.length);
+  const isLegacy = !hook && !stat && (question || c.headline || c.sections?.length);
+
+  // Highlight stat in red within stat_paragraph
+  const renderStatWithHighlight = (text, stat) => {
+    if (!stat) return text;
+    const parts = text.split(new RegExp(`(${stat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i'));
+    return parts.map((p, i) =>
+      p.toLowerCase() === stat.toLowerCase()
+        ? <Box key={i} component="span" sx={{ color: "#B22222", fontWeight: "bold" }}>{p}</Box>
+        : p
+    );
+  };
 
   return (
     <Box sx={{ bgcolor: "white", p: { xs: 1.5, md: 2.5 }, borderRadius: 1, color: "black",
@@ -200,78 +395,74 @@ const RenderedNewsletter = ({ newsletter }) => {
           ))}
         </Box>
       ) : (
-        /* ── New format ── */
+        /* ── New Tzunami format ── */
         <>
-          {/* Intro line */}
-          <Typography sx={{ color: "#888888", fontSize: "0.72rem", mb: 0.8 }}>
-            We've all seen the posts in Google News:
-          </Typography>
+          {/* Hero Image */}
+          {imageData && (
+            <Box sx={{ mb: 2, textAlign: "center" }}>
+              <Box
+                component="img"
+                src={`data:image/png;base64,${imageData}`}
+                alt="Newsletter hero"
+                sx={{ width: "100%", maxHeight: 400, objectFit: "cover", borderRadius: 1 }}
+              />
+            </Box>
+          )}
 
-          {/* LLM question — reddish */}
-          {question && (
-            <Typography sx={{
-              color: "#c0392b", fontWeight: "bold",
-              fontSize: { xs: "0.95rem", md: "1.05rem" },
-              lineHeight: 1.35, mb: 1.5,
-            }}>
-              {question}
+          {/* Hook paragraph */}
+          {hook && (
+            <Typography sx={{ color: "#757575", fontSize: "0.9rem", lineHeight: 1.6, mb: 1.5 }}>
+              {hook}
             </Typography>
           )}
 
-          {/* Constant challenge line */}
-          <Typography sx={{ color: "#555555", fontSize: "0.82rem", mb: 0.6 }}>
-            But what if it's not?
-          </Typography>
-
-          {/* TrendSense yes line */}
-          <Typography sx={{ color: "#222222", fontSize: "0.82rem", mb: 1.5 }}>
-            Cloudsfer provides a definitive{" "}
-            <Box component="span" sx={{ color: "#c0392b", fontWeight: "bold" }}>yes</Box>
-          </Typography>
-
-          {/* LLM answer */}
-          {answer && (
-            <Typography sx={{ color: "#333333", fontSize: "0.82rem",
-              lineHeight: 1.65, mb: 2.5 }}>
-              {answer}
+          {/* Stat paragraph with red highlight */}
+          {stat && (
+            <Typography sx={{ color: "#757575", fontSize: "0.9rem", lineHeight: 1.6, mb: 1.5 }}>
+              {renderStatWithHighlight(stat, highlight)}
             </Typography>
           )}
 
-          {/* CTA button — pill shape */}
-          {(() => {
-            const rawTerm = c.cta_term || c.keyword || "";
-            const term    = rawTerm.replace(/\s+support\s*$/i, "").trim();
-            const label = term
-              ? `→ Get Reliable ${term.charAt(0).toUpperCase() + term.slice(1)} Support with Cloudsfer`
-              : "→ Discover Cloudsfer";
-            return (
-              <Box sx={{ textAlign: "center", mb: 2 }}>
-                <Box
-                  component="a"
-                  href={CTA_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{
-                    display: "inline-block",
-                    bgcolor: "#2DBDAD",
-                    color: "#ffffff",
-                    px: 3, py: 1,
-                    borderRadius: "50px",
-                    fontWeight: "bold",
-                    fontSize: "0.78rem",
-                    textDecoration: "none",
-                    "&:hover": { bgcolor: "#1a9d8e" },
-                  }}
-                >
-                  {label}
-                </Box>
-              </Box>
-            );
-          })()}
+          {/* Context paragraph */}
+          {context && (
+            <Typography sx={{ color: "#757575", fontSize: "0.9rem", lineHeight: 1.6, mb: 1.5 }}>
+              {context}
+            </Typography>
+          )}
 
-          {/* Social share bar — orange with circular brand icons */}
+          {/* Solution paragraph */}
+          {solution && (
+            <Typography sx={{ color: "#757575", fontSize: "0.9rem", lineHeight: 1.6, mb: 2 }}>
+              {solution}
+            </Typography>
+          )}
+
+          {/* CTA button — blue pill */}
+          <Box sx={{ textAlign: "center", mb: 2 }}>
+            <Box
+              component="a"
+              href={CTA_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{
+                display: "inline-block",
+                bgcolor: "#2BAADF",
+                color: "#ffffff",
+                px: 3, py: 1,
+                borderRadius: "50px",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+                textDecoration: "none",
+                "&:hover": { bgcolor: "#25a0c4" },
+              }}
+            >
+              {ctaLabel}
+            </Box>
+          </Box>
+
+          {/* Social bar — blue (#31AFE2) with Mailchimp-style icons */}
           <Box sx={{
-            bgcolor: "#E8923A",
+            bgcolor: "#31AFE2",
             py: 1.25, mb: 2,
             borderRadius: "2px",
             display: "flex",
@@ -279,51 +470,34 @@ const RenderedNewsletter = ({ newsletter }) => {
             alignItems: "center",
             gap: 1,
           }}>
-            {SOCIAL_ICONS.map(({ label, bg, href, title, fontSize, fontWeight }) => (
+            {SOCIAL_LINKS.map(({ name, url, icon }) => (
               <Box
-                key={title}
+                key={name}
                 component="a"
-                href={href}
-                title={title}
+                href={url}
+                title={name}
                 target="_blank"
                 rel="noopener noreferrer"
                 sx={{
                   width: 26, height: 26,
-                  borderRadius: "50%",
-                  bgcolor: bg,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "#ffffff",
-                  fontSize: `calc(${fontSize} * 0.75)`, fontWeight,
                   textDecoration: "none",
                   flexShrink: 0,
                   "&:hover": { opacity: 0.85 },
                 }}
               >
-                {label}
+                <Box
+                  component="img"
+                  src={icon}
+                  alt={name}
+                  sx={{ width: 24, height: 24 }}
+                />
               </Box>
             ))}
           </Box>
 
-          {/* Italic quote box — gray background, centered */}
-          <Box sx={{
-            bgcolor: "#f0f0f0",
-            px: 2, py: 1.5,
-            borderRadius: "4px",
-            textAlign: "center",
-          }}>
-            <Typography sx={{
-              fontStyle: "italic", color: "#555555",
-              fontSize: "0.72rem", lineHeight: 1.6, mb: 0.5,
-            }}>
-              {NEWSLETTER_QUOTE_LINE1}
-            </Typography>
-            <Typography sx={{
-              fontStyle: "italic", color: "#555555",
-              fontSize: "0.72rem", lineHeight: 1.6,
-            }}>
-              {NEWSLETTER_QUOTE_LINE2}
-            </Typography>
-          </Box>
+          {/* Divider */}
+          <Box sx={{ height: 18 }} />
         </>
       )}
 

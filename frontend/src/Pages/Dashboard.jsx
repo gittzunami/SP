@@ -387,6 +387,7 @@ const Dashboard = () => {
                   {tasks.map((task) => {
                     const meta = statusMeta(task.status);
                     const totalTaskItems =
+                      task.result?.items_saved_to_db ??
                       task.result?.total_posts     ??
                       task.result?.total_tweets    ??
                       task.result?.total_articles  ??

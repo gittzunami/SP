@@ -26,6 +26,7 @@ if DB_AVAILABLE:
         scraped_at  = Column(DateTime(timezone=True))
         total_items = Column(Integer,    default=0)
         task_id     = Column(String(64), index=True)
+        batch_id    = Column(String(64), nullable=True, index=True)
 
     class TaskHistory(Base):
         __tablename__ = "task_history"

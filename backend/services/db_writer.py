@@ -83,7 +83,7 @@ def _j(value) -> Optional[str]:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _create_run(db: Session, scraper: str, payload: dict, task_id: str) -> int:
+def _create_run(db: Session, scraper: str, payload: dict, task_id: str, batch_id: str = None) -> int:
     """Insert a ScrapeRun audit row and return its id."""
     from db_models import ScrapeRun
 
@@ -108,7 +108,8 @@ def _create_run(db: Session, scraper: str, payload: dict, task_id: str) -> int:
             or len(payload.get("tweets",     []))
             or 0
         ),
-        task_id = task_id,
+        task_id  = task_id,
+        batch_id = batch_id,
     )
     db.add(run)
     db.flush()
@@ -120,7 +121,7 @@ def _create_run(db: Session, scraper: str, payload: dict, task_id: str) -> int:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_reddit(db: Session, payload: dict, task_id: str = "",
-                since_date: Optional[str] = None) -> int:
+                since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import RedditPost
 
     cutoff = _since_dt(since_date)
@@ -129,7 +130,7 @@ def save_reddit(db: Session, payload: dict, task_id: str = "",
         logger.warning("Reddit: no posts in payload (after date filter)")
         return 0
 
-    run_id = _create_run(db, "reddit", payload, task_id)
+    run_id = _create_run(db, "reddit", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for post_data in posts:
@@ -189,7 +190,7 @@ def _save_reddit_comments(db: Session, post_id: int, comments: list,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_tiktok(db: Session, payload: dict, task_id: str = "",
-                since_date: Optional[str] = None) -> int:
+                since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import TikTokPost, TikTokComment
 
     posts = payload.get("posts", [])
@@ -197,7 +198,7 @@ def save_tiktok(db: Session, payload: dict, task_id: str = "",
         logger.warning("TikTok: no posts in payload")
         return 0
 
-    run_id = _create_run(db, "tiktok", payload, task_id)
+    run_id = _create_run(db, "tiktok", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for p in posts:
@@ -261,7 +262,7 @@ def save_tiktok(db: Session, payload: dict, task_id: str = "",
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_edugeek(db: Session, payload: dict, task_id: str = "",
-                 since_date: Optional[str] = None) -> int:
+                 since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import EduGeekPost, EduGeekReply
 
     cutoff     = _since_dt(since_date)
@@ -273,7 +274,7 @@ def save_edugeek(db: Session, payload: dict, task_id: str = "",
         logger.warning("EduGeek: no items in payload (after date filter)")
         return 0
 
-    run_id = _create_run(db, "edugeek", payload, task_id)
+    run_id = _create_run(db, "edugeek", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for category, items in categories.items():
@@ -327,7 +328,7 @@ def save_edugeek(db: Session, payload: dict, task_id: str = "",
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_autodesk(db: Session, payload: dict, task_id: str = "",
-                  since_date: Optional[str] = None) -> int:
+                  since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import AutodeskPost, AutodeskReply
 
     cutoff = _since_dt(since_date)
@@ -336,7 +337,7 @@ def save_autodesk(db: Session, payload: dict, task_id: str = "",
         logger.warning("Autodesk: no posts in payload (after date filter)")
         return 0
 
-    run_id = _create_run(db, "autodesk", payload, task_id)
+    run_id = _create_run(db, "autodesk", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for p in posts:
@@ -400,7 +401,7 @@ def save_autodesk(db: Session, payload: dict, task_id: str = "",
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_stackexchange(db: Session, payload: dict, task_id: str = "",
-                       since_date: Optional[str] = None) -> int:
+                       since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import (
         StackExchangeQuestion, StackExchangeAnswer,
         StackExchangeQuestionComment, StackExchangeAnswerComment,
@@ -412,7 +413,7 @@ def save_stackexchange(db: Session, payload: dict, task_id: str = "",
         logger.warning("StackExchange: no questions in payload (after date filter)")
         return 0
 
-    run_id = _create_run(db, "stackexchange", payload, task_id)
+    run_id = _create_run(db, "stackexchange", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for q in questions:
@@ -500,7 +501,7 @@ def save_stackexchange(db: Session, payload: dict, task_id: str = "",
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_google_news(db: Session, payload: dict, task_id: str = "",
-                     since_date: Optional[str] = None) -> int:
+                     since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import GoogleNewsArticle
 
     raw_articles = payload.get("articles", [])
@@ -518,7 +519,7 @@ def save_google_news(db: Session, payload: dict, task_id: str = "",
         logger.warning("Google News: no articles in payload (after date filter)")
         return 0
 
-    run_id = _create_run(db, "google_news", payload, task_id)
+    run_id = _create_run(db, "google_news", payload, task_id, batch_id=batch_id)
     saved  = 0
     skipped_empty_url = 0
 
@@ -557,7 +558,7 @@ def save_google_news(db: Session, payload: dict, task_id: str = "",
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_instagram(db: Session, payload: dict, task_id: str = "",
-                   since_date: Optional[str] = None) -> int:
+                   since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import InstagramPost, InstagramComment
 
     posts = payload.get("posts", [])
@@ -565,7 +566,7 @@ def save_instagram(db: Session, payload: dict, task_id: str = "",
         logger.warning("Instagram: no posts in payload")
         return 0
 
-    run_id = _create_run(db, "instagram", payload, task_id)
+    run_id = _create_run(db, "instagram", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for p in posts:
@@ -617,7 +618,7 @@ def save_instagram(db: Session, payload: dict, task_id: str = "",
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_twitter(db: Session, payload: dict, task_id: str = "",
-                 since_date: Optional[str] = None) -> int:
+                 since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import TwitterTweet
 
     cutoff = _since_dt(since_date)
@@ -627,7 +628,7 @@ def save_twitter(db: Session, payload: dict, task_id: str = "",
         logger.warning("Twitter: no tweets in payload (after date filter)")
         return 0
 
-    run_id = _create_run(db, "twitter", payload, task_id)
+    run_id = _create_run(db, "twitter", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for t in tweets:
@@ -678,7 +679,7 @@ def save_twitter(db: Session, payload: dict, task_id: str = "",
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_spiceworks(db: Session, payload: dict, task_id: str = "",
-                    since_date: Optional[str] = None) -> int:
+                    since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import SpiceworksPost
 
     cutoff = _since_dt(since_date)
@@ -687,7 +688,7 @@ def save_spiceworks(db: Session, payload: dict, task_id: str = "",
         logger.warning("Spiceworks: no posts in payload (after date filter)")
         return 0
 
-    run_id = _create_run(db, "spiceworks", payload, task_id)
+    run_id = _create_run(db, "spiceworks", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for p in posts:
@@ -722,7 +723,7 @@ def save_spiceworks(db: Session, payload: dict, task_id: str = "",
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_quora(db: Session, payload: dict, task_id: str = "",
-               since_date: Optional[str] = None) -> int:
+               since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import QuoraQuestion, QuoraAnswer
 
     cutoff    = _since_dt(since_date)
@@ -731,7 +732,7 @@ def save_quora(db: Session, payload: dict, task_id: str = "",
         logger.warning("Quora: no questions in payload")
         return 0
 
-    run_id = _create_run(db, "quora", payload, task_id)
+    run_id = _create_run(db, "quora", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for q in questions:
@@ -793,7 +794,7 @@ def save_quora(db: Session, payload: dict, task_id: str = "",
 # ══════════════════════════════════════════════════════════════════════════════
 
 def save_facebook(db: Session, payload: dict, task_id: str = "",
-                  since_date: Optional[str] = None) -> int:
+                  since_date: Optional[str] = None, batch_id: str = None) -> int:
     from db_models import FacebookPost, FacebookComment
 
     cutoff = _since_dt(since_date)
@@ -802,7 +803,7 @@ def save_facebook(db: Session, payload: dict, task_id: str = "",
         logger.warning("Facebook: no posts in payload (after date filter)")
         return 0
 
-    run_id = _create_run(db, "facebook", payload, task_id)
+    run_id = _create_run(db, "facebook", payload, task_id, batch_id=batch_id)
     saved  = 0
 
     for post in posts:
@@ -871,7 +872,7 @@ SAVERS = {
 
 
 def save(scraper: str, db: Session, payload: dict, task_id: str = "",
-         since_date: Optional[str] = None) -> int:
+         since_date: Optional[str] = None, batch_id: str = None) -> int:
     """Entry point called from main.py after every scraper run."""
     fn = SAVERS.get(scraper)
     if fn is None:
@@ -880,7 +881,7 @@ def save(scraper: str, db: Session, payload: dict, task_id: str = "",
     if db is None:
         return 0
     try:
-        return fn(db, payload, task_id, since_date=since_date) or 0
+        return fn(db, payload, task_id, since_date=since_date, batch_id=batch_id) or 0
     except Exception as exc:
         logger.error("DB write failed for %s: %s", scraper, exc)
         try:

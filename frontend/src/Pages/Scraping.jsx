@@ -20,8 +20,7 @@ import { useBudget }          from "../BudgetContext";
 import { useAppTheme }        from "../AppThemeContext";
 import { useNotifications }   from "../NotificationContext";
 
-const API_BASE    = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const STORAGE_KEY = "scraper_cards_v3";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 // comments/replies are auto-calculated: max_posts × 50
 const calcReplies = (posts) => (Number(posts) || 0) * 50;
@@ -168,43 +167,12 @@ function buildDefault() {
   return Object.fromEntries(SCRAPER_DEFS.map((d) => [d.key, defaultCard()]));
 }
 
-function loadCards() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return buildDefault();
-    const saved  = JSON.parse(raw);
-    const result = buildDefault();
-    for (const key of Object.keys(result)) {
-      if (saved[key]) {
-        const savedCard = { ...saved[key] };
-        if (savedCard.taskId && !savedCard.taskIds) {
-          savedCard.taskIds = [savedCard.taskId];
-          delete savedCard.taskId;
-        }
-        if (!savedCard.taskIds) savedCard.taskIds = [];
-        result[key] = {
-          ...result[key],
-          ...savedCard,
-          status: savedCard.status === "queued" ? "idle" : savedCard.status,
-        };
-      }
-    }
-    return result;
-  } catch {
-    return buildDefault();
-  }
-}
-
-function persist(state) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
-}
-
 const TODAY = new Date().toISOString().slice(0, 10);
 
 // ══════════════════════════════════════════════════════════════════════════════
 const Scraping = () => {
   const { C, isDark } = useAppTheme();
-  const [cards,        setCards]        = useState(loadCards);
+  const [cards,        setCards]        = useState(buildDefault);
   const [modal,        setModal]        = useState({ open: false, mode: "single", scraperKey: null });
   const [formValues,   setFormValues]   = useState({});
   const [runDate,      setRunDate]      = useState(null);
@@ -242,7 +210,6 @@ const Scraping = () => {
   const notifiedRef = useRef(new Set()); // taskIds already notified on completion/failure
   useEffect(() => {
     cardsRef.current = cards;
-    persist(cards);
   }, [cards]);
 
   const showToast = (msg, severity = "success") =>
@@ -252,39 +219,31 @@ const Scraping = () => {
     setCards((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
   }, []);
 
-  // ── Sync last_run + totalItems from backend on mount ─────────────────────
+  // ── Sync last_run + totalItems from DB on mount ────────────────────────────
   useEffect(() => {
-    apiFetch(`${API_BASE}/api/status`)
+    apiFetch(`${API_BASE}/api/scraper-latest-batch-status`)
       .then((r) => r.json())
-      .then((status) => {
+      .then((batchStatus) => {
         setCards((prev) => {
           const next = { ...prev };
-          for (const [key, s] of Object.entries(status)) {
+          for (const [key, data] of Object.entries(batchStatus)) {
             if (!next[key]) continue;
 
             // Fix stuck running/queued state
-            if (!s.running &&
-                (next[key].status === "running" || next[key].status === "queued")) {
+            if (next[key].status === "running" || next[key].status === "queued") {
               next[key] = {
                 ...next[key],
-                status:  s.last_run ? "completed" : "idle",
-                lastRun: s.last_run
-                  ? new Date(s.last_run).toLocaleString()
-                  : next[key].lastRun,
+                status: data.last_run ? "completed" : "idle",
               };
             }
 
-            // Restore lastRun if missing locally
-            if (s.last_run && !next[key].lastRun) {
-              next[key] = { ...next[key], lastRun: new Date(s.last_run).toLocaleString() };
-            }
-
-            // Always restore totalItems/itemsProcessed from backend (authoritative source)
-            if (s.last_total_items != null) {
-              next[key] = { ...next[key], totalItems: s.last_total_items };
-            }
-            if (s.last_newsletters_created != null) {
-              next[key] = { ...next[key], itemsProcessed: s.last_newsletters_created };
+            // Restore lastRun and totalItems from DB
+            if (data.last_run) {
+              next[key] = {
+                ...next[key],
+                lastRun: new Date(data.last_run).toLocaleString(),
+                totalItems: data.last_total_items,
+              };
             }
           }
           return next;
@@ -349,6 +308,7 @@ const Scraping = () => {
               completedCount++;
               if (task.result) {
                 totalItems +=
+                  task.result.items_saved_to_db ??
                   task.result.total_posts ??
                   task.result.total_tweets ??
                   task.result.total_articles ??
@@ -371,7 +331,7 @@ const Scraping = () => {
                 notifiedRef.current.add(taskId);
                 addNotification({
                   title:   `${name} keyword completed`,
-                  message: task.result?.total_posts ?? task.result?.total_items ?? "Done",
+                  message: task.result?.items_saved_to_db ?? task.result?.total_posts ?? task.result?.total_items ?? "Done",
                   type: "success",
                 });
               } else if (task.status === "failed") {
@@ -666,11 +626,12 @@ const Scraping = () => {
 
   const closeModal = () => setModal({ open: false, mode: "single", scraperKey: null });
 
-  const fireScraper = async (def, payload) => {
+  const fireScraper = async (def, payload, batchId) => {
+    const body = { ...payload, batch_id: batchId };
     const res = await apiFetch(`${API_BASE}${def.endpoint}`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(payload),
+      body:    JSON.stringify(body),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -762,9 +723,10 @@ const Scraping = () => {
           }
           const pairs = [];
           fbSelectedGroups.forEach((grp) => scraperKws.forEach((kw) => pairs.push({ grp, kw })));
+          const fbBatchId = crypto.randomUUID();
           const results = await Promise.allSettled(
             pairs.map(({ grp, kw }) =>
-              fireScraper(def, def.buildPayload(formValues, kw.keyword, runDate, grp.url))
+              fireScraper(def, def.buildPayload(formValues, kw.keyword, runDate, grp.url), fbBatchId)
             )
           );
           const succeeded = results.filter((r) => r.status === "fulfilled");
@@ -791,8 +753,9 @@ const Scraping = () => {
             setSubmitting(false);
             return;
           }
+          const batchId = crypto.randomUUID();
           const results = await Promise.allSettled(
-            scraperKws.map((kw) => fireScraper(def, def.buildPayload(formValues, kw.keyword, runDate)))
+            scraperKws.map((kw) => fireScraper(def, def.buildPayload(formValues, kw.keyword, runDate), batchId))
           );
           const succeeded = results.filter((r) => r.status === "fulfilled");
           if (succeeded.length > 0)
@@ -832,11 +795,12 @@ const Scraping = () => {
           setSubmitting(false);
           return;
         }
+        const runAllBatchId = crypto.randomUUID();
         const results = await Promise.allSettled(
           jobs.map(async ({ def, kw, grp }) => {
             const fv = Object.fromEntries(def.fields.map((f) => [f.id, f.default]));
             if (def.fields[0]) fv[def.fields[0].id] = maxItems;
-            const taskId = await fireScraper(def, def.buildPayload(fv, kw.keyword, runDate, grp?.url));
+            const taskId = await fireScraper(def, def.buildPayload(fv, kw.keyword, runDate, grp?.url), runAllBatchId);
             return { key: def.key, taskId };
           })
         );

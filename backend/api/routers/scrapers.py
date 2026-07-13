@@ -114,6 +114,21 @@ def _filter_by_date(scraper: str, result: dict, since_date: str) -> dict:
         result["posts"]       = posts
         result["total_items"] = len(posts)
 
+    elif scraper == "facebook":
+        posts = [p for p in result.get("posts", []) if _keep(p, "created_at")]
+        result["posts"]       = posts
+        result["total_posts"] = len(posts)
+
+    elif scraper == "quora":
+        def _q_keep(q):
+            for a in q.get("answers", []):
+                if _keep(a, "date"):
+                    return True
+            return False
+        questions = [q for q in result.get("questions", []) if _q_keep(q)]
+        result["questions"]    = questions
+        result["total_items"]  = len(questions)
+
     logger.info("Date filter (%s, since=%s): applied", scraper, since_date)
     return result
 
@@ -213,6 +228,8 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
         if since_date:
             result = _filter_by_date(scraper, result, since_date)
 
+        batch_id = getattr(cfg, "batch_id", None)
+
         _scraped_counts = {
             k: result[k]
             for k in ("total_posts", "total_questions", "total_tweets", "total_articles", "total_items")
@@ -221,7 +238,7 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
         if spend_db is not None and scraper != "google_news":
             from services.db_writer import save
             try:
-                actual_saved = save(scraper, spend_db, result, task_id, since_date=since_date)
+                actual_saved = save(scraper, spend_db, result, task_id, since_date=since_date, batch_id=batch_id)
                 result["items_saved_to_db"] = actual_saved
                 logger.info("DB write complete for task %s (%s): %d saved (scraped: %s)",
                             task_id[:8], scraper, actual_saved, _scraped_counts)
@@ -310,7 +327,7 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
         keyword = getattr(cfg, "keyword", "") or ""
         if not keyword and hasattr(cfg, "keywords"):
             keyword = (getattr(cfg, "keywords", None) or [""])[0]
-        items = (
+        items = result.get("items_saved_to_db") or (
             _scraped_counts.get("total_posts") or _scraped_counts.get("total_tweets") or
             _scraped_counts.get("total_articles") or _scraped_counts.get("total_questions") or
             _scraped_counts.get("total_items") or 0
@@ -538,3 +555,58 @@ def delete_task(task_id: str = FPath(...)):
 @router.get("/api/status", tags=["Status"])
 def get_status():
     return state.scraper_status
+
+
+@router.get("/api/scraper-latest-batch-status", tags=["Status"])
+def get_latest_batch_status(db: Session = Depends(get_db)):
+    """Return per-scraper latest batch total items from DB."""
+    from db_models import ScrapeRun
+    from sqlalchemy import func as _func, literal
+
+    result = {}
+    scrapers = ["reddit", "tiktok", "edugeek", "stackexchange", "autodesk",
+                "twitter", "instagram", "google_news", "spiceworks", "quora", "facebook"]
+
+    for scraper in scrapers:
+        # Find the latest batch_id for this scraper
+        latest_batch_subq = (
+            db.query(ScrapeRun.batch_id)
+            .filter(ScrapeRun.scraper == scraper, ScrapeRun.batch_id.isnot(None))
+            .order_by(ScrapeRun.scraped_at.desc())
+            .limit(1)
+            .subquery()
+        )
+
+        row = db.query(
+            _func.sum(ScrapeRun.total_items).label("total_items"),
+            _func.max(ScrapeRun.scraped_at).label("last_run"),
+        ).filter(
+            ScrapeRun.scraper == scraper,
+            ScrapeRun.batch_id == db.query(latest_batch_subq.c.batch_id).scalar_subquery(),
+        ).first()
+
+        if row and row.total_items is not None:
+            result[scraper] = {
+                "last_total_items": int(row.total_items),
+                "last_run": row.last_run.isoformat() if row.last_run else None,
+            }
+        else:
+            # Fallback: get the most recent single run
+            latest = (
+                db.query(ScrapeRun)
+                .filter(ScrapeRun.scraper == scraper)
+                .order_by(ScrapeRun.scraped_at.desc())
+                .first()
+            )
+            if latest:
+                result[scraper] = {
+                    "last_total_items": latest.total_items or 0,
+                    "last_run": latest.scraped_at.isoformat() if latest.scraped_at else None,
+                }
+            else:
+                result[scraper] = {
+                    "last_total_items": 0,
+                    "last_run": None,
+                }
+
+    return result

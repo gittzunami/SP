@@ -73,6 +73,7 @@ class RedditConfig(BaseModel):
     max_comments: int = Field(default=_REDDIT_MAX_COMMENTS, ge=0)
     since_date:   Optional[str] = Field(default=None, description="ISO date string e.g. '2024-01-15'")
     schedule:     ScheduleInterval = "manual"
+    batch_id:     Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "keyword": "school IT infrastructure", "subreddits": ["sysadmin"],
@@ -86,6 +87,7 @@ class TikTokConfig(BaseModel):
     max_posts:    int = Field(default=_TIKTOK_MAX_POSTS,    ge=1)
     max_comments: int = Field(default=_TIKTOK_MAX_COMMENTS, ge=0)
     schedule:     ScheduleInterval = "manual"
+    batch_id:     Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "keyword": "edtech", "max_posts": 20, "max_comments": 10,
@@ -102,6 +104,7 @@ class EduGeekConfig(BaseModel):
     max_replies: int = Field(default=_EDUGEEK_MAX_REPLIES, ge=0)
     since_date:  Optional[str] = Field(default=None, description="ISO date string")
     schedule:    ScheduleInterval = "manual"
+    batch_id:    Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "keyword": "network switch", "categories": ["forums"],
@@ -118,6 +121,7 @@ class StackExchangeConfig(BaseModel):
     max_comments: int = Field(default=_SE_MAX_COMMENTS,  ge=0)
     since_date:   Optional[str] = Field(default=None, description="ISO date string")
     schedule:     ScheduleInterval = "manual"
+    batch_id:     Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "sites": ["stackoverflow", "superuser"], "keyword": "windows group policy",
@@ -134,6 +138,7 @@ class AutodeskConfig(BaseModel):
     max_replies:   int = Field(default=_AUTODESK_MAX_REPLIES, ge=0)
     since_date:    Optional[str] = Field(default=None, description="ISO date string")
     schedule:      ScheduleInterval = "manual"
+    batch_id:      Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "keyword": "AutoCAD performance slow", "content_types": ["all"],
@@ -147,6 +152,7 @@ class TwitterConfig(BaseModel):
     lang:       str        = Field(default=_TWITTER_LANG, description="Language filter e.g. 'en'")
     since_date: Optional[str] = Field(default=None, description="ISO date string")
     schedule:   ScheduleInterval = "manual"
+    batch_id:   Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "keywords": ["Pakistan", "education technology"], "max_tweets": 20, "lang": "en",
@@ -157,6 +163,7 @@ class InstagramConfig(BaseModel):
     keywords:      List[str] = Field(..., description="Usernames or hashtags")
     results_limit: int = Field(default=_INSTAGRAM_RESULTS_LIMIT, ge=1)
     schedule:      ScheduleInterval = "manual"
+    batch_id:      Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "keywords": ["nasa", "#pakistan"], "results_limit": 20,
@@ -168,6 +175,7 @@ class GoogleNewsConfig(BaseModel):
     max_results: int = Field(default=_GOOGLE_NEWS_MAX_RESULTS, ge=1)
     since_date:  Optional[str] = Field(default=None, description="ISO date string")
     schedule:    ScheduleInterval = "manual"
+    batch_id:    Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "keywords": ["AI in education", "edtech"], "max_results": 50,
@@ -179,6 +187,7 @@ class SpiceworksConfig(BaseModel):
     max_results: int = Field(default=20, ge=1)
     since_date:  Optional[str] = Field(default=None, description="ISO date string")
     schedule:    ScheduleInterval = "manual"
+    batch_id:    Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "keyword": "network switch", "max_results": 20,
@@ -189,6 +198,7 @@ class QuoraConfig(BaseModel):
     keyword:     str
     max_results: int = Field(default=_QUORA_MAX_RESULTS, ge=1)
     schedule:    ScheduleInterval = "manual"
+    batch_id:    Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "keyword": "cloud migration challenges", "max_results": 10,
@@ -205,6 +215,7 @@ class FacebookConfig(BaseModel):
     max_posts: int = Field(default=_FACEBOOK_MAX_POSTS, ge=1)
     since_date: Optional[str] = Field(default=None, description="ISO date string")
     schedule:  ScheduleInterval = "manual"
+    batch_id:  Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")
 
     model_config = {"json_schema_extra": {"example": {
         "group_url": "https://www.facebook.com/groups/123456789",

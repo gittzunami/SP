@@ -383,21 +383,78 @@ def _fetch_article_content(url: str) -> str:
         return ""
 
 
+# ── DALL-E image generation ───────────────────────────────────────────────────
+
+def _generate_newsletter_image(prompt: str, api_key: str) -> str:
+    """
+    Generate a hero image using OpenAI DALL-E.
+    Returns base64-encoded PNG string or "" on failure.
+    """
+    if not api_key or not prompt:
+        return ""
+
+    try:
+        import base64
+        import openai
+        client = openai.OpenAI(api_key=api_key)
+
+        logger.info("DALL-E: generating image for prompt: %s", prompt[:100])
+        resp = client.images.generate(
+            model="gpt-image-1",
+            prompt=prompt,
+            n=1,
+            size="1536x1024",
+            quality="low",
+        )
+
+        image_url = resp.data[0].url
+        if not image_url:
+            logger.warning("DALL-E: no image URL returned")
+            return ""
+
+        img_resp = requests.get(image_url, timeout=60)
+        if img_resp.status_code != 200:
+            logger.warning("DALL-E: failed to download image — HTTP %d", img_resp.status_code)
+            return ""
+
+        b64 = base64.b64encode(img_resp.content).decode("utf-8")
+        logger.info("DALL-E: image generated (%d bytes, %d base64 chars)", len(img_resp.content), len(b64))
+        return b64
+
+    except Exception as exc:
+        logger.error("DALL-E image generation failed: %s", exc)
+        return ""
+
+
 # ── Newsletter generation prompt ──────────────────────────────────────────────
-NEWSLETTER_SYSTEM = """You are a marketing newsletter writer for Cloudsfer, a cloud migration platform.
+NEWSLETTER_SYSTEM = """You are a marketing newsletter writer for Tzunami, a cloud data governance and compliance platform.
 You will receive ONE Google News article — its title, description, source, and (when available) the full article body text.
 
-Your job:
-1. Read the full article content carefully to understand the specific topic, concern, or finding it reports.
-2. Write a skeptical question a reader might ask after reading this article — it must sound like a genuine concern or doubt triggered by the article's content, NOT a generic summary or restatement of it.
-3. Write a confident, concise answer from Cloudsfer's perspective that directly addresses that concern.
-4. Extract a short, specific 2-5 word term from the question that captures the core topic (e.g. "cloud data migration", "photo transfer", "storage costs"). This will be used in a CTA button: "Get Reliable <term> Support with Cloudsfer".
+Write a newsletter body in exactly 4 paragraphs, totaling 250-300 words:
+
+Paragraph1 (Hook): Introduce the problem or finding from the article in a relatable, engaging way. Make the reader feel the urgency. 2-3 sentences.
+
+Paragraph2 (Stats): Cite a specific source with concrete statistics. Format: "According to [Source Name], who [credibility statement], [statistic]..." Include one key statistic that should be highlighted in red. 2-3 sentences.
+
+Paragraph3 (Context): Connect the article's topic to current trends — AI adoption, Microsoft Copilot, compliance regulations, data security, or cloud governance. Show why this matters NOW. 2-3 sentences.
+
+Paragraph4 (Solution): Introduce Tzunami as the solution. Position Tzunami as the platform that gives organizations visibility and control. Be authoritative but not salesy. 2-3 sentences.
+
+Also generate:
+- A short CTA button label (e.g. "👉 Request a Free Demo" or "👉 See How Tzunami Can Help")
+- A brief image prompt describing a professional, abstract illustration for this topic (for DALL-E generation). The prompt should describe a clean, corporate, modern illustration — NO text, NO logos, NO words in the image. Focus on visual metaphors (shields, clouds, data flows, locks, networks). Style: flat design, blue/teal color palette.
 
 Return ONLY valid JSON — no markdown, no code fences, nothing outside the JSON:
 {
-  "question": "A specific skeptical question a reader would ask after reading this article (1-2 sentences, genuine concern, not a summary)",
-  "answer": "Cloudsfer's confident answer (2-3 sentences, authoritative and reassuring)",
-  "cta_term": "2-5 word specific term from the question for the CTA button"
+  "hook_paragraph": "2-3 sentences introducing the problem",
+  "stat_paragraph": "2-3 sentences with source citation and statistics",
+  "source_name": "Name of the source you cited",
+  "source_url": "URL to the source article or study (use the article URL if no other source)",
+  "highlight_stat": "The key statistic to display in red (e.g. '60-80%' or '3x more')",
+  "context_paragraph": "2-3 sentences connecting to current trends",
+  "solution_paragraph": "2-3 sentences introducing Tzunami as the solution",
+  "cta_label": "Button text (e.g. '👉 Request a Free Demo')",
+  "image_prompt": "Brief description of a professional abstract illustration for DALL-E (no text, no logos)"
 }"""
 
 
@@ -771,10 +828,21 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
         content_parsed = json.loads(content)
     except json.JSONDecodeError:
         content_parsed = {
-            "question": f"What's really happening with {keyword}?",
-            "answer": content[:500] if content else "",
+            "hook_paragraph": f"What's really happening with {keyword}?",
+            "stat_paragraph": content[:300] if content else "",
+            "source_name": article.get("source_name", ""),
+            "source_url": article_url,
+            "highlight_stat": "",
+            "context_paragraph": "",
+            "solution_paragraph": "Tzunami provides the visibility and control organizations need.",
+            "cta_label": "👉 Request a Free Demo",
+            "image_prompt": f"A professional abstract illustration about {keyword}",
         }
 
+    # Generate hero image via DALL-E
+    image_prompt = content_parsed.get("image_prompt", "")
+    image_data = _generate_newsletter_image(image_prompt, api_key)
+    content_parsed["image_data"] = image_data
     content_parsed["keyword"] = keyword
 
     try:

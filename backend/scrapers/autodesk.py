@@ -41,7 +41,7 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-LANGUAGE_FILTER     = "AND language = 'English'"
+LANGUAGE_FILTER     = ""   # deprecated in Autodesk LiQL — filter client-side
 ALL_CONTENT_TYPES   = ["forum", "qanda", "tkb", "blog", "idea"]
 CONTENT_TYPE_LABELS = {
     "forum": "Forum Discussions",
@@ -90,7 +90,8 @@ def _liql(query: str, label: str = "") -> List[dict]:
             dev = data.get("data", {}).get("developer_message", "")
             logger.warning("LiQL error [%s]: %s — %s", label, msg, dev)
             return []
-        return data.get("data", {}).get("items", [])
+        items = data.get("data", {}).get("items", [])
+        return [i for i in items if i.get("language", "EN") in ("EN", "English")]
     except Exception as e:
         logger.error("LiQL request error [%s]: %s", label, e)
         return []

@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -95,6 +96,26 @@ def _scrappa_page(keyword: str, page: int) -> List[dict]:
     except Exception as exc:
         logger.error("Quora: Scrappa request failed (page %d) — %s", page, exc)
         return []
+    if resp.status_code == 401:
+        raise RuntimeError(
+            "Scrappa: Invalid API key — check SCRAPPA_API_KEY in .env"
+        )
+    if resp.status_code == 402:
+        raise RuntimeError(
+            "Scrappa: Out of credits — top up at scrappa.co/dashboard"
+        )
+    if resp.status_code == 403:
+        raise RuntimeError(
+            "Scrappa: Access denied (403) — your API key may lack required permissions"
+        )
+    if resp.status_code == 429:
+        logger.warning("Scrappa rate limited on page %d — waiting 20s", page)
+        time.sleep(20)
+        return _scrappa_page(keyword, page)
+    if resp.status_code >= 500:
+        raise RuntimeError(
+            f"Server is on maintenance, Please try again later.|||Scrappa server error {resp.status_code}"
+        )
     if resp.status_code != 200:
         logger.warning("Quora: Scrappa HTTP %d on page %d", resp.status_code, page)
         return []
