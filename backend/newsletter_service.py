@@ -441,7 +441,7 @@ Paragraph3 (Context): Connect the article's topic to current trends — AI adopt
 Paragraph4 (Solution): Introduce Tzunami as the solution. Position Tzunami as the platform that gives organizations visibility and control. Be authoritative but not salesy. 2-3 sentences.
 
 Also generate:
-- A short CTA button label (e.g. "👉 Request a Free Demo" or "👉 See How Tzunami Can Help")
+- A short CTA button label (e.g. "👉Schedule a discovery call")
 - A brief image prompt describing a professional, abstract illustration for this topic (for DALL-E generation). The prompt should describe a clean, corporate, modern illustration — NO text, NO logos, NO words in the image. Focus on visual metaphors (shields, clouds, data flows, locks, networks). Style: flat design, blue/teal color palette.
 
 Return ONLY valid JSON — no markdown, no code fences, nothing outside the JSON:
@@ -453,7 +453,7 @@ Return ONLY valid JSON — no markdown, no code fences, nothing outside the JSON
   "highlight_stat": "The key statistic to display in red (e.g. '60-80%' or '3x more')",
   "context_paragraph": "2-3 sentences connecting to current trends",
   "solution_paragraph": "2-3 sentences introducing Tzunami as the solution",
-  "cta_label": "Button text (e.g. '👉 Request a Free Demo')",
+  "cta_label": "Button text (e.g. '👉 Schedule a discovery call')",
   "image_prompt": "Brief description of a professional abstract illustration for DALL-E (no text, no logos)"
 }"""
 
@@ -554,41 +554,9 @@ def send_to_webhook(db, task_id: str, keyword: str, articles: list[dict]) -> dic
         job.status = "pending_approval"
         job.error = "WEBHOOK_URL not configured in .env"
         db.commit()
-        return _job_dict(job)
 
-    logger.info("Waiting for approval on job %s...", job_id)
-
-    try:
-        while True:
-            time.sleep(10)
-            db.expire_all()
-            db.commit()
-            job = db.query(NewsletterJob).filter_by(job_id=job_id).first()
-            if not job:
-                logger.error("Job %s not found in DB", job_id)
-                return {"job_id": job_id, "status": "error", "error": "Job not found"}
-            logger.info("Job %s status: %s", job_id, job.status)
-
-            if job.status in ("pending_approval", "approved", "generating"):
-                # process_webhook_response is handling the approval — just wait
-                continue
-
-            elif job.status == "completed":
-                from db_models import GeneratedNewsletter
-                nl_count = db.query(GeneratedNewsletter).filter_by(job_id=job_id).count()
-                logger.info("Job %s completed — %d newsletters in DB", job_id, nl_count)
-                return {**_job_dict(job), "newsletters_created": nl_count}
-
-            elif job.status in ("rejected", "failed"):
-                logger.info("Job %s %s: %s", job_id, job.status, job.error)
-                return _job_dict(job)
-
-            else:
-                logger.info("Job %s unexpected status: %s", job_id, job.status)
-                return _job_dict(job)
-    except (KeyboardInterrupt, SystemExit):
-        logger.warning("Job %s: interrupted — keeping job in pending_approval", job_id)
-        return _job_dict(job)
+    logger.info("Job %s created — returning immediately (approval handled by webhook)", job_id)
+    return _job_dict(job)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -629,6 +597,18 @@ def process_webhook_response(db, job_id: str, approved: bool,
         job.error = reason or "Rejected by reviewer"
         db.commit()
         logger.info("Job %s rejected: %s", job_id, reason)
+        # Update TaskHistory so System Activity shows "failed"
+        if job.task_id:
+            try:
+                from db_models import TaskHistory
+                task_row = db.query(TaskHistory).filter_by(task_id=job.task_id).first()
+                if task_row:
+                    task_row.status      = "failed"
+                    task_row.finished_at = _now()
+                    task_row.error       = (reason or "Rejected by reviewer")[:500]
+                    db.commit()
+            except Exception:
+                pass
         return _job_dict(job)
 
     # ── Approved: filter to selected articles ─────────────────────────────────
@@ -682,6 +662,21 @@ def process_webhook_response(db, job_id: str, approved: bool,
         job.status = "completed"
         job.completed_at = _now()
         db.commit()
+
+        # Update TaskHistory so System Activity shows "completed"
+        if job.task_id:
+            try:
+                from db_models import TaskHistory
+                task_row = db.query(TaskHistory).filter_by(task_id=job.task_id).first()
+                if task_row:
+                    task_row.status      = "completed"
+                    task_row.finished_at = _now()
+                    task_row.items_count = len(selected_articles)
+                    db.commit()
+                    logger.info("TaskHistory %s updated to completed (%d items)",
+                                job.task_id[:8], len(selected_articles))
+            except Exception as exc:
+                logger.warning("Could not update TaskHistory for job %s: %s", job_id, exc)
 
         return {
             **_job_dict(job),
@@ -835,7 +830,7 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
             "highlight_stat": "",
             "context_paragraph": "",
             "solution_paragraph": "Tzunami provides the visibility and control organizations need.",
-            "cta_label": "👉 Request a Free Demo",
+            "cta_label": "👉 Schedule a discovery call",
             "image_prompt": f"A professional abstract illustration about {keyword}",
         }
 

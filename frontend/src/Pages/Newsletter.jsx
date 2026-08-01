@@ -22,7 +22,7 @@ const API_BASE    = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
 const SIDEBAR_KEY = "TrendSense_newsletter_sidebar_open";
 
 // ── Static newsletter copy — Tzunami branding ────────────────────────────────
-const CTA_URL = "https://cloudsfer.com/contact-us/";
+const CTA_URL = "https://booking.cloudsfer.com/meetings/book-tzunami/cloudsfer-sales-discovery-?uuid=9c89c0bf-3626-47ed-831c-f5e2a8ce1380";
 
 const SOCIAL_LINKS = [
   { name: "Facebook", url: "https://www.facebook.com/TzunamiDeployer?locale=he_IL", icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-facebook-48.png" },
@@ -52,7 +52,7 @@ function buildGmailHtml(newsletter) {
   const highlight= String(c.highlight_stat || "");
   const context  = String(c.context_paragraph || "");
   const solution = String(c.solution_paragraph || "");
-  const ctaLabel = String(c.cta_label || "👉 Request a Free Demo");
+  const ctaLabel = String(c.cta_label || "👉Schedule a discovery call");
   const imageData= String(c.image_data || "");
 
   const esc = (s) => s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -345,7 +345,7 @@ const RenderedNewsletter = ({ newsletter }) => {
   const highlight = c.highlight_stat || "";
   const context   = c.context_paragraph || null;
   const solution  = c.solution_paragraph || null;
-  const ctaLabel  = c.cta_label || "👉 Request a Free Demo";
+  const ctaLabel  = c.cta_label || "👉 Schedule a discovery call";
   const imageData = c.image_data || "";
 
   // Legacy format detection

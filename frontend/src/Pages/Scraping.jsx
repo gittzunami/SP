@@ -151,11 +151,12 @@ const SCRAPER_DEFS = [
 ];
 
 const STATUS_META = {
-  idle:      { label: "Idle",    color: "#64748b", bg: "#64748b20" },
-  running:   { label: "Running", color: "#3b82f6", bg: "#3b82f620" },
-  completed: { label: "Done",    color: "#10b981", bg: "#10b98120" },
-  failed:    { label: "Failed",  color: "#ef4444", bg: "#ef444420" },
-  queued:    { label: "Queued",  color: "#f59e0b", bg: "#f59e0b20" },
+  idle:              { label: "Idle",    color: "#64748b", bg: "#64748b20" },
+  running:           { label: "Running", color: "#3b82f6", bg: "#3b82f620" },
+  pending_approval:  { label: "Awaiting Approval", color: "#f59e0b", bg: "#f59e0b20" },
+  completed:         { label: "Done",    color: "#10b981", bg: "#10b98120" },
+  failed:            { label: "Failed",  color: "#ef4444", bg: "#ef444420" },
+  queued:            { label: "Queued",  color: "#f59e0b", bg: "#f59e0b20" },
 };
 
 const defaultCard = () => ({
@@ -229,7 +230,7 @@ const Scraping = () => {
           for (const [key, data] of Object.entries(batchStatus)) {
             if (!next[key]) continue;
 
-            // Fix stuck running/queued state
+            // Fix stuck running/queued state (but NOT pending_approval — that's genuine)
             if (next[key].status === "running" || next[key].status === "queued") {
               next[key] = {
                 ...next[key],
@@ -286,13 +287,14 @@ const Scraping = () => {
   useEffect(() => {
     const id = setInterval(async () => {
       const active = Object.entries(cardsRef.current).filter(
-        ([, s]) => s.taskIds?.length > 0 && (s.status === "queued" || s.status === "running")
+        ([, s]) => s.taskIds?.length > 0 && (s.status === "queued" || s.status === "running" || s.status === "pending_approval")
       );
       if (!active.length) return;
       for (const [key, s] of active) {
         let completedCount = 0;
         let failedCount = 0;
         let runningCount = 0;
+        let pendingCount = 0;
         let latestError = null;
         let totalItems = 0;
         let itemsProcessed = 0;
@@ -321,6 +323,8 @@ const Scraping = () => {
             } else if (task.status === "failed") {
               failedCount++;
               latestError = task.error || "Run failed";
+            } else if (task.status === "pending_approval") {
+              pendingCount++;
             } else if (task.status === "queued" || task.status === "running") {
               runningCount++;
             }
@@ -352,6 +356,8 @@ const Scraping = () => {
         if (itemsProcessed > 0) patch.itemsProcessed = itemsProcessed;
         if (runningCount > 0) {
           patch.status = "running";
+        } else if (pendingCount > 0) {
+          patch.status = "pending_approval";
         } else if (failedCount === s.taskIds.length) {
           patch.status = "failed";
           patch.error = latestError;
@@ -898,7 +904,7 @@ const Scraping = () => {
         {SCRAPER_DEFS.map((def) => {
           const s           = cards[def.key];
           const meta        = STATUS_META[s.status] || STATUS_META.idle;
-          const isRunning   = s.status === "queued" || s.status === "running";
+          const isRunning   = s.status === "queued" || s.status === "running" || s.status === "pending_approval";
           const blocked     = isScraperBlocked(def.key);
           const blockReason = getBlockReason(def.key);
           const showPending = def.key === "google_news" && hasPending;

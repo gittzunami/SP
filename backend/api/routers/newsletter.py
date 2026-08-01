@@ -190,7 +190,7 @@ def auto_scrape_google_news(background_tasks: BackgroundTasks, db: Session = Dep
 
     try:
         db.add(TaskHistory(
-            task_id=task_id, scraper="google_news", status="queued",
+            task_id=task_id, scraper="google_news", status="pending_approval",
             started_at=now, keyword=", ".join(keywords[:3]),
         ))
         db.commit()
@@ -201,7 +201,7 @@ def auto_scrape_google_news(background_tasks: BackgroundTasks, db: Session = Dep
     try:
         from core.container import state
         state.task_registry[task_id] = {
-            "task_id": task_id, "scraper": "google_news", "status": "queued",
+            "task_id": task_id, "scraper": "google_news", "status": "pending_approval",
             "started_at": now.isoformat(), "finished_at": None,
             "result": None, "error": None,
         }

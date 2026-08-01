@@ -135,13 +135,13 @@ def _filter_by_date(scraper: str, result: dict, since_date: str) -> dict:
 
 # ── Task factory ──────────────────────────────────────────────────────────────
 
-def _make_task(scraper: str) -> str:
+def _make_task(scraper: str, initial_status: str = "queued") -> str:
     tid = uuid.uuid4().hex
     now = datetime.now(tz=timezone.utc)
     state.task_registry[tid] = {
         "task_id":     tid,
         "scraper":     scraper,
-        "status":      "queued",
+        "status":      initial_status,
         "started_at":  now.isoformat(),
         "finished_at": None,
         "result":      None,
@@ -152,7 +152,7 @@ def _make_task(scraper: str) -> str:
         if db:
             from db_models import TaskHistory
             db.add(TaskHistory(
-                task_id=tid, scraper=scraper, status="queued",
+                task_id=tid, scraper=scraper, status=initial_status,
                 started_at=now, finished_at=None, keyword=None, items_count=0, error=None,
             ))
             db.commit()
@@ -332,8 +332,12 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
             _scraped_counts.get("total_articles") or _scraped_counts.get("total_questions") or
             _scraped_counts.get("total_items") or 0
         )
+
+        # Google News with webhook: stay "pending_approval" until webhook response arrives
+        final_status = "pending_approval" if result.get("_webhook_pending") else "completed"
+
         state.task_registry[task_id].update({
-            "status":      "completed",
+            "status":      final_status,
             "finished_at": finished_at.isoformat(),
             "result":      result,
         })
@@ -342,7 +346,7 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
                 from db_models import TaskHistory
                 row = spend_db.query(TaskHistory).filter_by(task_id=task_id).first()
                 if row:
-                    row.status      = "completed"
+                    row.status      = final_status
                     row.finished_at = finished_at
                     row.keyword     = keyword[:255] if keyword else None
                     row.items_count = items
@@ -466,7 +470,7 @@ def run_instagram(cfg: InstagramConfig, background_tasks: BackgroundTasks):
 
 @router.post("/api/run/google-news")
 def run_google_news(cfg: GoogleNewsConfig, background_tasks: BackgroundTasks):
-    tid = _make_task("google_news")
+    tid = _make_task("google_news", initial_status="pending_approval")
     background_tasks.add_task(_run_scraper, tid, "google_news", cfg)
     return {"message": "Google News scraper queued.", "task_id": tid}
 
@@ -526,6 +530,7 @@ def list_tasks():
         "total":     len(tasks),
         "queued":    sum(1 for t in tasks if t["status"] == "queued"),
         "running":   sum(1 for t in tasks if t["status"] == "running"),
+        "pending_approval": sum(1 for t in tasks if t["status"] == "pending_approval"),
         "completed": sum(1 for t in tasks if t["status"] == "completed"),
         "failed":    sum(1 for t in tasks if t["status"] == "failed"),
         "tasks":     tasks,

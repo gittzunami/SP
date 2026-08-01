@@ -82,11 +82,12 @@ function timeAgo(isoString) {
 
 function statusMeta(status) {
   switch (status) {
-    case "completed": return { color: "#10b981", icon: <CheckCircleIcon    sx={{ fontSize: 20, color: "#10b981" }} /> };
-    case "running":   return { color: "#3b82f6", icon: <BoltIcon           sx={{ fontSize: 20, color: "#3b82f6" }} /> };
-    case "queued":    return { color: "#f59e0b", icon: <HourglassEmptyIcon sx={{ fontSize: 20, color: "#f59e0b" }} /> };
-    case "failed":    return { color: "#ef4444", icon: <ErrorIcon          sx={{ fontSize: 20, color: "#ef4444" }} /> };
-    default:          return { color: "#64748b", icon: <StorageIcon        sx={{ fontSize: 20, color: "#64748b" }} /> };
+    case "completed":        return { color: "#10b981", icon: <CheckCircleIcon    sx={{ fontSize: 20, color: "#10b981" }} /> };
+    case "running":          return { color: "#3b82f6", icon: <BoltIcon           sx={{ fontSize: 20, color: "#3b82f6" }} /> };
+    case "pending_approval": return { color: "#f59e0b", icon: <HourglassEmptyIcon sx={{ fontSize: 20, color: "#f59e0b" }} /> };
+    case "queued":           return { color: "#f59e0b", icon: <HourglassEmptyIcon sx={{ fontSize: 20, color: "#f59e0b" }} /> };
+    case "failed":           return { color: "#ef4444", icon: <ErrorIcon          sx={{ fontSize: 20, color: "#ef4444" }} /> };
+    default:                 return { color: "#64748b", icon: <StorageIcon        sx={{ fontSize: 20, color: "#64748b" }} /> };
   }
 }
 
@@ -407,7 +408,7 @@ const Dashboard = () => {
                       }}>
                         <Box sx={{ mr: 2 }}>
                           <Box sx={{ p: 1, bgcolor: meta.color + "15", borderRadius: 1.5, display: "flex" }}>
-                            {task.status === "running" || task.status === "queued"
+                            {task.status === "running" || task.status === "queued" || task.status === "pending_approval"
                               ? <CircularProgress size={20} sx={{ color: meta.color }} />
                               : meta.icon}
                           </Box>
