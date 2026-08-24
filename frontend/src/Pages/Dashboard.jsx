@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../api";
+import { getPref } from "../core/api/preferences";
 import {
   Box, Card, CardContent, Typography, Grid,
   Stack, CircularProgress, Tooltip, useMediaQuery, useTheme,
@@ -10,7 +11,6 @@ import {
 } from "recharts";
 import TrendingUpIcon          from "@mui/icons-material/Timeline";
 import StorageIcon             from "@mui/icons-material/Storage";
-import WarningAmberIcon        from "@mui/icons-material/WarningAmber";
 import AutoAwesomeIcon         from "@mui/icons-material/AutoAwesome";
 import CheckCircleIcon         from "@mui/icons-material/CheckCircle";
 import ErrorIcon               from "@mui/icons-material/Error";
@@ -84,29 +84,12 @@ function statusMeta(status) {
   switch (status) {
     case "completed":        return { color: "#10b981", icon: <CheckCircleIcon    sx={{ fontSize: 20, color: "#10b981" }} /> };
     case "running":          return { color: "#3b82f6", icon: <BoltIcon           sx={{ fontSize: 20, color: "#3b82f6" }} /> };
-    case "pending_approval": return { color: "#f59e0b", icon: <HourglassEmptyIcon sx={{ fontSize: 20, color: "#f59e0b" }} /> };
     case "queued":           return { color: "#f59e0b", icon: <HourglassEmptyIcon sx={{ fontSize: 20, color: "#f59e0b" }} /> };
     case "failed":           return { color: "#ef4444", icon: <ErrorIcon          sx={{ fontSize: 20, color: "#ef4444" }} /> };
     default:                 return { color: "#64748b", icon: <StorageIcon        sx={{ fontSize: 20, color: "#64748b" }} /> };
   }
 }
 
-const STORAGE_KEY = "scraper_cards_v3";
-
-function readEnabledFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const saved = JSON.parse(raw);
-    const result = {};
-    for (const key of Object.keys(saved)) {
-      result[key] = saved[key]?.enabled !== false;
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
 
 const Dashboard = () => {
   const { C }          = useAppTheme();
@@ -119,12 +102,27 @@ const Dashboard = () => {
   const [scraperBlocks, setScraperBlocks] = useState({});
   const [tasks,         setTasks]         = useState([]);
   const [stats24h,      setStats24h]      = useState({ total_items: 0, change_7d_pct: null });
-  const [pendingJobs,   setPendingJobs]   = useState(0);
   const [llmSpending,   setLlmSpending]   = useState(null);
   const [spendData,     setSpendData]     = useState(null);
   const [monthlyStats,  setMonthlyStats]  = useState([]);
+  const [enabledMap,    setEnabledMap]    = useState({});
   const [loading,       setLoading]       = useState(true);
   const [now,           setNow]           = useState(new Date());
+
+  useEffect(() => {
+    getPref("scraper_cards_enabled", null).then((raw) => {
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          const result = {};
+          for (const key of Object.keys(parsed)) {
+            result[key] = parsed[key]?.enabled !== false;
+          }
+          setEnabledMap(result);
+        } catch {}
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -133,11 +131,10 @@ const Dashboard = () => {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, tasksRes, statsRes, pendingRes, llmRes, blocksRes, spendRes, monthlyRes] = await Promise.allSettled([
+      const [statusRes, tasksRes, statsRes, llmRes, blocksRes, spendRes, monthlyRes] = await Promise.allSettled([
         apiFetch(`${API_BASE}/api/status`),
         apiFetch(`${API_BASE}/api/tasks`),
         apiFetch(`${API_BASE}/api/stats/24h`),
-        apiFetch(`${API_BASE}/api/newsletter/pending`),
         apiFetch(`${API_BASE}/api/llm/spending`),
         apiFetch(`${API_BASE}/api/spending/scraper-status`),
         apiFetch(`${API_BASE}/api/spending/summary`),
@@ -164,11 +161,6 @@ const Dashboard = () => {
       if (statsRes.status === "fulfilled" && statsRes.value.ok)
         setStats24h(await statsRes.value.json());
 
-      if (pendingRes.status === "fulfilled" && pendingRes.value.ok) {
-        const p = await pendingRes.value.json();
-        setPendingJobs((p.jobs || []).length);
-      }
-
       if (llmRes.status === "fulfilled" && llmRes.value.ok)
         setLlmSpending(await llmRes.value.json());
 
@@ -191,8 +183,6 @@ const Dashboard = () => {
   }, [fetchData]);
 
   const runningCount  = ALL_SCRAPERS.filter((key) => scraperStatus[key]?.running).length;
-
-  const enabledMap   = readEnabledFromStorage();
   const activeCount  = ALL_SCRAPERS.filter((key) => {
     const isEnabled  = enabledMap[key] !== false;
     const isBlocked  = isHardBlocked || scraperBlocks[key]?.is_blocked === true;
@@ -249,15 +239,6 @@ const Dashboard = () => {
       iconBg:   "rgba(59,130,246,0.1)",
       sub:      changeLabel,
       subColor: changeColor,
-    },
-    {
-      label:    "PENDING APPROVALS",
-      value:    loading ? "…" : String(pendingJobs),
-      icon:     WarningAmberIcon,
-      color:    pendingJobs > 0 ? "#f97316" : "#64748b",
-      iconBg:   pendingJobs > 0 ? "rgba(249,115,22,0.1)" : "rgba(100,116,139,0.1)",
-      sub:      pendingJobs > 0 ? "Newsletters awaiting review" : "No pending approvals",
-      subColor: pendingJobs > 0 ? "#f97316" : "#64748b",
     },
     {
       label:    "SPEND THIS MONTH",
@@ -330,7 +311,7 @@ const Dashboard = () => {
         {metrics.map((metric, idx) => {
           const Icon = metric.icon;
           return (
-            <Grid item xs={12} sm={6} md={3} key={idx} sx={{ display: "flex", flexGrow: 1 }}>
+            <Grid item xs={12} sm={6} md={4} key={idx} sx={{ display: "flex", flexGrow: 1 }}>
               <Card sx={cardSx}>
                 <CardContent sx={{ p: { xs: 2, md: 3 }, flexGrow: 1 }}>
                   <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 1.5 }}>
@@ -408,7 +389,7 @@ const Dashboard = () => {
                       }}>
                         <Box sx={{ mr: 2 }}>
                           <Box sx={{ p: 1, bgcolor: meta.color + "15", borderRadius: 1.5, display: "flex" }}>
-                            {task.status === "running" || task.status === "queued" || task.status === "pending_approval"
+                            {task.status === "running" || task.status === "queued"
                               ? <CircularProgress size={20} sx={{ color: meta.color }} />
                               : meta.icon}
                           </Box>

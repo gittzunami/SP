@@ -280,6 +280,93 @@ def enhance_prompt(db, raw_prompt: str, data_sources: list[str] = None,
 #  Feed to LLM  (sends data + enhanced prompt to the user's selected provider)
 # ══════════════════════════════════════════════════════════════════════════════
 
+SOURCE_DISPLAY_MAP: dict[str, str] = {
+    "facebook": "Facebook",
+    "reddit": "Reddit",
+    "twitter": "Twitter",
+    "instagram": "Instagram",
+    "tiktok": "TikTok",
+    "google_news": "Google News",
+    "gnews": "Google News",
+    "autodesk": "Autodesk",
+    "edugeek": "EduGeek",
+    "spiceworks": "Spiceworks",
+    "stackexchange": "Stack Exchange",
+    "quora": "Quora",
+}
+
+
+def compute_top_sources_breakdown(data_rows: list[dict]) -> str:
+    """
+    Computes top 3 sources from data_rows sorted by count descending with percentages.
+    If more than 3 sources exist, combines remaining sources into 'Others'.
+    Returns a Markdown section string starting with ## Top Sources.
+    """
+    if not data_rows:
+        return ""
+
+    counts: dict[str, int] = {}
+    for r in data_rows:
+        if not isinstance(r, dict):
+            continue
+        raw_src = (
+            r.get("source")
+            or r.get("platform")
+            or r.get("scraper")
+            or ""
+        )
+        raw_key = str(raw_src).strip().lower()
+        if not raw_key:
+            raw_key = "other"
+        name = SOURCE_DISPLAY_MAP.get(raw_key, raw_key.replace("_", " ").title())
+        counts[name] = counts.get(name, 0) + 1
+
+    total = sum(counts.values())
+    if total == 0:
+        return ""
+
+    # Sort descending by count, then ascending by name
+    sorted_sources = sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+
+    top3 = sorted_sources[:3]
+    remaining = sorted_sources[3:]
+
+    lines = ["## Top Sources"]
+    for name, count in top3:
+        pct = round((count / total) * 100, 1)
+        pct_str = f"{int(pct)}%" if pct.is_integer() else f"{pct}%"
+        lines.append(f"- **{name}**: {pct_str}")
+
+    if remaining:
+        rem_count = sum(c for _, c in remaining)
+        rem_pct = round((rem_count / total) * 100, 1)
+        pct_str = f"{int(rem_pct)}%" if rem_pct.is_integer() else f"{rem_pct}%"
+        lines.append(f"- **Others**: {pct_str}")
+
+    return "\n".join(lines)
+
+
+def _append_or_sync_top_sources(content: str, data_rows: list[dict]) -> str:
+    """
+    Ensures that ## Top Sources with accurate computed percentages is present at the end of the analysis.
+    """
+    sources_section = compute_top_sources_breakdown(data_rows)
+    if not sources_section:
+        return content
+
+    text = (content or "").rstrip()
+    import re
+    pattern = re.compile(
+        r"(?:\n|^)##\s+(?:top\s+sources?|sources?\s+distribution|data\s+sources?\s+breakdown|sources?\s+breakdown)[\s\S]*$",
+        re.IGNORECASE,
+    )
+    if pattern.search(text):
+        cleaned_text = pattern.sub("", text).rstrip()
+        return f"{cleaned_text}\n\n{sources_section}"
+    else:
+        return f"{text}\n\n{sources_section}"
+
+
 def _truncate_data(data_rows: list[dict]) -> tuple[str, int]:
     """Serialize all records and send them to the LLM as-is, no size limit."""
     text = json.dumps(data_rows, ensure_ascii=False, indent=2)
@@ -325,6 +412,7 @@ def feed_to_llm(db, enhanced_prompt: str, data_rows: list[dict],
         "If the subject involves risks also add **Risks**: N; if it involves opportunities add **Opportunities**: N. "
         "This section drives the summary dashboard and must be the first ## section.\n"
         "- Use the section heading '## Key Topics' when listing themes, topics, or categories, and list each one as a bullet item.\n"
+        "- Always conclude your response with a '## Top Sources' section at the very end that lists the top 3 data sources included in the analysis sorted by percentage from highest to lowest, followed by 'Others' with the remaining percentage if applicable.\n"
         "- If the user's prompt requests a specific structure or output format, honour it within these Markdown conventions."
     )
     user_msg = (
@@ -335,13 +423,18 @@ def feed_to_llm(db, enhanced_prompt: str, data_rows: list[dict],
     )
 
     if provider == "openai":
-        return _call_openai(db, api_key, model, system_msg, user_msg, keyword)
+        result = _call_openai(db, api_key, model, system_msg, user_msg, keyword)
     elif provider == "anthropic":
-        return _call_anthropic(db, api_key, model, system_msg, user_msg, keyword)
+        result = _call_anthropic(db, api_key, model, system_msg, user_msg, keyword)
     elif provider == "gemini":
-        return _call_gemini(db, api_key, model, system_msg, user_msg, keyword)
+        result = _call_gemini(db, api_key, model, system_msg, user_msg, keyword)
     else:
         raise RuntimeError(f"Unknown provider: {provider}")
+
+    if isinstance(result, dict) and "response" in result:
+        result["response"] = _append_or_sync_top_sources(result["response"], data_rows)
+
+    return result
 
 
 def _call_openai(db, api_key: str, model: str, system_msg: str,

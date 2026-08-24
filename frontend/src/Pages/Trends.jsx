@@ -25,12 +25,12 @@ import DeleteOutlineIcon     from "@mui/icons-material/DeleteOutline";
 import CalendarTodayIcon     from "@mui/icons-material/CalendarToday";
 import CloseIcon             from "@mui/icons-material/Close";
 import { useAppTheme }       from "../AppThemeContext";
+import { getPref, setPref }  from "../core/api/preferences";
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel,
 } from "docx";
 
 const API_BASE      = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const SIDEBAR_KEY   = "trendsense_sidebar_open";
 const SIDEBAR_WIDTH = 272;
 
 const PROVIDER_COLORS = {
@@ -1000,10 +1000,17 @@ const Trends = () => {
   const [selectedId,  setSelectedId]  = useState(null);
   const [histLoading, setHistLoading] = useState(true);
   const [dateFilter,  setDateFilter]  = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 600) return false;
-    try { return localStorage.getItem(SIDEBAR_KEY) !== "false"; } catch { return true; }
-  });
+  const [sidebarOpen, setSidebarOpen] = useState(
+    typeof window !== "undefined" && window.innerWidth >= 600
+  );
+
+  // Load sidebar state from DB on mount
+  useEffect(() => {
+    getPref("trends_sidebar_open", null).then((val) => {
+      if (val !== null) setSidebarOpen(val !== "false");
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [copied,           setCopied]           = useState(false);
   const [promptExpanded,   setPromptExpanded]   = useState(false);
@@ -1063,7 +1070,7 @@ const Trends = () => {
   const handleToggleSidebar = () => {
     setSidebarOpen(prev => {
       const next = !prev;
-      try { localStorage.setItem(SIDEBAR_KEY, String(next)); } catch {}
+      setPref("trends_sidebar_open", String(next));
       return next;
     });
   };

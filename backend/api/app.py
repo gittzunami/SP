@@ -28,7 +28,7 @@ import scheduler_service as sched
 from api.middleware.auth import jwt_middleware
 from core.logging import setup_logging
 from api.routers import (
-    auth, health, keywords, llm, newsletter,
+    auth, health, keywords, llm, newsletter, preferences,
     results, schedule, scrapers, search, smart_brain, spending, stats,
 )
 from core.container import state
@@ -161,6 +161,7 @@ def create_app() -> FastAPI:
     application.include_router(search.router)
     application.include_router(stats.router)
     application.include_router(results.router)
+    application.include_router(preferences.router)
 
     return application
 

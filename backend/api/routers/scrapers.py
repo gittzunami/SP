@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi import Path as FPath
 from sqlalchemy.orm import Session
 
@@ -333,8 +333,7 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
             _scraped_counts.get("total_items") or 0
         )
 
-        # Google News with webhook: stay "pending_approval" until webhook response arrives
-        final_status = "pending_approval" if result.get("_webhook_pending") else "completed"
+        final_status = "completed"
 
         state.task_registry[task_id].update({
             "status":      final_status,
@@ -390,6 +389,106 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
                 spend_db.close()
             except Exception:
                 pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Auto-scheduler Smart Brain coordinator
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _run_all_auto_scrape(task_ids: list[str], batch_id: str) -> None:
+    """
+    Background coordinator:
+      1. Waits for all scraper tasks to finish (polls every 10s, max 45 min)
+      2. Loads all scraped records for this batch from DB
+      3. Fetches the most recently saved Smart Brain prompt
+      4. Runs LLM analysis and saves result to smart_brain_analyses
+    """
+    import time
+    import database as _db
+    from core.container import state as _state
+
+    logger.info("Auto-scheduler coordinator started — batch %s, %d tasks", batch_id[:8], len(task_ids))
+
+    # ── Poll until all tasks done (or timeout) ────────────────────────────────
+    deadline = time.time() + 45 * 60  # 45 minutes
+    while time.time() < deadline:
+        statuses = [
+            _state.task_registry.get(tid, {}).get("status", "unknown")
+            for tid in task_ids
+        ]
+        pending = [s for s in statuses if s not in ("completed", "failed")]
+        if not pending:
+            break
+        logger.debug("Auto-scheduler batch %s — %d tasks still running", batch_id[:8], len(pending))
+        time.sleep(10)
+    else:
+        logger.warning("Auto-scheduler batch %s timed out after 45 min — running Smart Brain on available data", batch_id[:8])
+
+    # ── Collect scraped records for this batch ────────────────────────────────
+    db = _db.SessionLocal() if _db.SessionLocal else None
+    if db is None:
+        logger.error("Auto-scheduler: no DB session available, aborting Smart Brain step")
+        return
+
+    try:
+        from db_models import ScrapeRun, SavedPrompt
+        from api.routers.smart_brain import _smart_brain_records_for_runs
+
+        runs = db.query(ScrapeRun).filter(ScrapeRun.batch_id == batch_id).all()
+        if not runs:
+            logger.warning("Auto-scheduler batch %s: no ScrapeRun rows found — skipping Smart Brain", batch_id[:8])
+            return
+
+        data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=50)
+        if not data_rows:
+            logger.warning("Auto-scheduler batch %s: no records found for Smart Brain", batch_id[:8])
+            return
+
+        # ── Fetch most recently saved prompt ──────────────────────────────────
+        prompt_row = db.query(SavedPrompt).order_by(SavedPrompt.created_at.desc()).first()
+        if not prompt_row:
+            logger.warning("Auto-scheduler batch %s: no saved prompt found — skipping Smart Brain", batch_id[:8])
+            return
+
+        logger.info(
+            "Auto-scheduler batch %s: running Smart Brain on %d records with prompt id=%d",
+            batch_id[:8], len(data_rows), prompt_row.id,
+        )
+
+        # ── Run LLM analysis ──────────────────────────────────────────────────
+        from llm_service import feed_to_llm
+        try:
+            result = feed_to_llm(db, prompt_row.text, data_rows, keyword=f"Scheduled Batch {batch_id[:8]}")
+        except RuntimeError as exc:
+            logger.error("Auto-scheduler Smart Brain LLM call failed: %s", exc)
+            return
+
+        # ── Save to smart_brain_analyses ──────────────────────────────────────
+        from db_models import SmartBrainAnalysis
+        entry = SmartBrainAnalysis(
+            result          = result["response"],
+            provider        = result["provider"],
+            model           = result["model"],
+            tokens_used     = result.get("tokens_used", 0),
+            cost_usd        = result.get("cost_usd", 0.0),
+            enhanced_prompt = "",
+            prompt_used     = prompt_row.text,
+            record_count    = len(data_rows),
+        )
+        db.add(entry)
+        db.commit()
+        logger.info(
+            "Auto-scheduler batch %s: Smart Brain analysis saved (id=%d, %d tokens, %d records)",
+            batch_id[:8], entry.id, entry.tokens_used, len(data_rows),
+        )
+
+    except Exception as exc:
+        logger.exception("Auto-scheduler coordinator failed for batch %s: %s", batch_id[:8], exc)
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -470,7 +569,7 @@ def run_instagram(cfg: InstagramConfig, background_tasks: BackgroundTasks):
 
 @router.post("/api/run/google-news")
 def run_google_news(cfg: GoogleNewsConfig, background_tasks: BackgroundTasks):
-    tid = _make_task("google_news", initial_status="pending_approval")
+    tid = _make_task("google_news")
     background_tasks.add_task(_run_scraper, tid, "google_news", cfg)
     return {"message": "Google News scraper queued.", "task_id": tid}
 
@@ -494,6 +593,228 @@ def run_facebook(cfg: FacebookConfig, background_tasks: BackgroundTasks):
     tid = _make_task("facebook")
     background_tasks.add_task(_run_scraper, tid, "facebook", cfg)
     return {"message": "Facebook Groups scraper queued.", "task_id": tid}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Unified auto-scrape webhook (for MS Power Automate)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/api/webhook/scrapers/auto-scrape", tags=["Webhooks"])
+async def auto_scrape_all(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Parameterless automated webhook for scheduled scraping (Power Automate, Cron, etc.).
+
+    Operates completely bodyless and parameterless:
+    1. Resolves 'since_date' exclusively from 'last_auto_scrape_timestamp' in the database.
+    2. Automatically updates 'last_auto_scrape_timestamp' to the current execution time.
+    3. Runs all 8 scrapers across dedicated Auto Keywords and Auto Facebook Groups.
+    4. Automatically triggers Smart Brain analysis on the newly collected batch.
+    """
+    now = datetime.now(timezone.utc)
+    from db_models import ScraperKeyword, ScraperKeywordSelection, FacebookGroup, UserPreferences
+
+    # ── Resolve since_date exclusively from DB last_auto_scrape_timestamp ─────
+    last_pref = db.query(UserPreferences).filter_by(key="last_auto_scrape_timestamp").first()
+    if last_pref and last_pref.value:
+        try:
+            last_dt = datetime.fromisoformat(last_pref.value)
+            since_date = last_dt.strftime("%Y-%m-%d")
+            logger.info("Auto-scrape: dynamic gap resolved from database last run timestamp: %s (since_date=%s)", last_pref.value, since_date)
+        except Exception:
+            since_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+            logger.info("Auto-scrape: fallback since_date applied: %s", since_date)
+    else:
+        since_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        logger.info("Auto-scrape: initial run detected — defaulting since_date to: %s", since_date)
+
+    # ── Update last_auto_scrape_timestamp in DB for subsequent runs ────────────
+    try:
+        if not last_pref:
+            last_pref = UserPreferences(key="last_auto_scrape_timestamp", value=now.isoformat())
+            db.add(last_pref)
+        else:
+            last_pref.value = now.isoformat()
+        db.commit()
+        logger.info("Auto-scrape: updated last_auto_scrape_timestamp in DB to %s", now.isoformat())
+    except Exception as exc:
+        logger.warning("Could not update last_auto_scrape_timestamp in DB: %s", exc)
+
+    max_items = 50
+
+    # ── Scrapers to run (Google News excluded — has its own webhook) ──────────
+    SCRAPERS = ["reddit", "edugeek", "facebook", "quora",
+                "spiceworks", "stackexchange", "autodesk", "twitter"]
+
+    # ── Fetch keywords for auto-scrape ─────────────────────────────────────────
+    # If dedicated 'auto' pool keywords exist (up to 8), use them exclusively across all scrapers.
+    # Otherwise fallback to per-scraper selections.
+    auto_kw_rows = (
+        db.query(ScraperKeyword)
+        .filter(ScraperKeyword.pool == "auto")
+        .order_by(ScraperKeyword.created_at)
+        .all()
+    )
+    auto_keywords = [r.keyword for r in auto_kw_rows if r.keyword.strip()]
+
+    if auto_keywords:
+        kw_map: dict[str, list[str]] = {s: list(auto_keywords) for s in SCRAPERS}
+        logger.info("Auto-scrape webhook: using %d dedicated Auto Keywords: %s", len(auto_keywords), auto_keywords)
+    else:
+        selections = (
+            db.query(ScraperKeywordSelection, ScraperKeyword)
+            .join(ScraperKeyword, ScraperKeywordSelection.keyword_id == ScraperKeyword.id)
+            .filter(ScraperKeywordSelection.scraper.in_(SCRAPERS))
+            .all()
+        )
+        kw_map: dict[str, list[str]] = {s: [] for s in SCRAPERS}
+        for sel, kw in selections:
+            kw_map[sel.scraper].append(kw.keyword)
+
+    # ── Facebook: resolve selected groups ─────────────────────────────────────
+    fb_groups: list[str] = []
+    if kw_map.get("facebook"):
+        # First check dedicated Auto Facebook Groups
+        auto_group_rows = (
+            db.query(FacebookGroup)
+            .filter(FacebookGroup.is_auto == True)
+            .order_by(FacebookGroup.created_at)
+            .all()
+        )
+        fb_groups = [g.url for g in auto_group_rows if g.url]
+
+        # Fallback to manual selected groups if no auto groups exist
+        if not fb_groups:
+            pref_row = (
+                db.query(UserPreferences)
+                .filter_by(key="fb_selected_groups")
+                .first()
+            )
+            if pref_row and pref_row.value:
+                try:
+                    selected_ids = set(_json.loads(pref_row.value))
+                except Exception:
+                    selected_ids = set()
+                group_rows = (
+                    db.query(FacebookGroup)
+                    .filter(FacebookGroup.id.in_(selected_ids))
+                    .all()
+                )
+                fb_groups = [g.url for g in group_rows if g.url]
+
+        if fb_groups:
+            logger.info("Auto-scrape webhook: using %d Facebook groups for auto scraping", len(fb_groups))
+        else:
+            logger.info("Auto-scrape: no Facebook groups configured — skipping Facebook")
+            kw_map["facebook"] = []
+
+    # ── Generate batch_id shared across all tasks ─────────────────────────────
+    batch_id = uuid.uuid4().hex
+    all_task_ids: list[str] = []
+
+    # ── Build and fire tasks ──────────────────────────────────────────────────
+    from api.schemas.scrapers import (
+        RedditConfig, EduGeekConfig, FacebookConfig, QuoraConfig,
+        SpiceworksConfig, StackExchangeConfig, AutodeskConfig, TwitterConfig,
+    )
+
+    for scraper in SCRAPERS:
+        keywords = kw_map.get(scraper, [])
+        if not keywords:
+            continue
+
+        for keyword in keywords:
+            if scraper == "facebook":
+                for group_url in fb_groups:
+                    cfg = FacebookConfig(
+                        keyword=keyword, group_url=group_url,
+                        max_posts=max_items, since_date=since_date, batch_id=batch_id,
+                    )
+                    tid = _make_task(scraper)
+                    background_tasks.add_task(_run_scraper, tid, scraper, cfg)
+                    all_task_ids.append(tid)
+
+            elif scraper == "reddit":
+                cfg = RedditConfig(
+                    keyword=keyword, max_posts=max_items,
+                    max_comments=max_items * 2, since_date=since_date, batch_id=batch_id,
+                )
+                tid = _make_task(scraper)
+                background_tasks.add_task(_run_scraper, tid, scraper, cfg)
+                all_task_ids.append(tid)
+
+            elif scraper == "edugeek":
+                cfg = EduGeekConfig(
+                    keyword=keyword, max_items=max_items,
+                    max_replies=max_items * 2, since_date=since_date, batch_id=batch_id,
+                )
+                tid = _make_task(scraper)
+                background_tasks.add_task(_run_scraper, tid, scraper, cfg)
+                all_task_ids.append(tid)
+
+            elif scraper == "quora":
+                # Quora has no date filter
+                cfg = QuoraConfig(keyword=keyword, max_results=max_items, batch_id=batch_id)
+                tid = _make_task(scraper)
+                background_tasks.add_task(_run_scraper, tid, scraper, cfg)
+                all_task_ids.append(tid)
+
+            elif scraper == "spiceworks":
+                cfg = SpiceworksConfig(
+                    keyword=keyword, max_results=max_items,
+                    since_date=since_date, batch_id=batch_id,
+                )
+                tid = _make_task(scraper)
+                background_tasks.add_task(_run_scraper, tid, scraper, cfg)
+                all_task_ids.append(tid)
+
+            elif scraper == "stackexchange":
+                cfg = StackExchangeConfig(
+                    keyword=keyword, max_per_site=max_items,
+                    max_answers=max_items * 2, since_date=since_date, batch_id=batch_id,
+                )
+                tid = _make_task(scraper)
+                background_tasks.add_task(_run_scraper, tid, scraper, cfg)
+                all_task_ids.append(tid)
+
+            elif scraper == "autodesk":
+                cfg = AutodeskConfig(
+                    keyword=keyword, max_posts=max_items,
+                    max_replies=max_items * 2, since_date=since_date, batch_id=batch_id,
+                )
+                tid = _make_task(scraper)
+                background_tasks.add_task(_run_scraper, tid, scraper, cfg)
+                all_task_ids.append(tid)
+
+            elif scraper == "twitter":
+                cfg = TwitterConfig(
+                    keywords=[keyword], max_tweets=max_items,
+                    since_date=since_date, batch_id=batch_id,
+                )
+                tid = _make_task(scraper)
+                background_tasks.add_task(_run_scraper, tid, scraper, cfg)
+                all_task_ids.append(tid)
+
+    if not all_task_ids:
+        raise HTTPException(400, "No keywords selected for any scraper. Please select keywords on the Scraping page first.")
+
+    # ── Launch Smart Brain coordinator ────────────────────────────────────────
+    background_tasks.add_task(_run_all_auto_scrape, all_task_ids, batch_id)
+
+    scrapers_active = len({
+        scraper for scraper in SCRAPERS if kw_map.get(scraper)
+    })
+
+    return {
+        "status":          "started",
+        "batch_id":        batch_id,
+        "scrapers_queued": scrapers_active,
+        "task_count":      len(all_task_ids),
+        "since_date":      since_date,
+        "task_ids":        all_task_ids,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -613,5 +934,32 @@ def get_latest_batch_status(db: Session = Depends(get_db)):
                     "last_total_items": 0,
                     "last_run": None,
                 }
+
+        # Check TaskHistory if it has a more recent execution timestamp
+        from db_models import TaskHistory
+        last_task = (
+            db.query(TaskHistory)
+            .filter(TaskHistory.scraper == scraper)
+            .order_by(TaskHistory.started_at.desc())
+            .first()
+        )
+        if last_task and (last_task.finished_at or last_task.started_at):
+            task_time = last_task.finished_at or last_task.started_at
+            current_run_iso = result[scraper].get("last_run")
+            if not current_run_iso:
+                result[scraper]["last_run"] = task_time.isoformat()
+                result[scraper]["last_total_items"] = last_task.items_count or 0
+            else:
+                try:
+                    current_dt = datetime.fromisoformat(current_run_iso)
+                    if task_time.tzinfo is None:
+                        task_time = task_time.replace(tzinfo=timezone.utc)
+                    if current_dt.tzinfo is None:
+                        current_dt = current_dt.replace(tzinfo=timezone.utc)
+                    if task_time > current_dt:
+                        result[scraper]["last_run"] = task_time.isoformat()
+                        result[scraper]["last_total_items"] = last_task.items_count or 0
+                except Exception:
+                    pass
 
     return result

@@ -153,7 +153,6 @@ const LLMFeedModal = ({ open, onClose, selectedRows = [], onNavigateToConfig }) 
         generatedAt:    new Date().toISOString(),
       };
       // Persist so analysis survives navigation away and back
-      try { sessionStorage.setItem("TrendSense_trend_result", JSON.stringify(trendResult)); } catch {}
       addNotification({
         title:   "LLM Analysis complete",
         message: `${data.provider ? `${data.provider.charAt(0).toUpperCase() + data.provider.slice(1)} · ` : ""}${frozenRows.length} record${frozenRows.length !== 1 ? "s" : ""} analysed`,

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../api";
+import { getPref, setPref } from "../core/api/preferences";
 import {
   Box, Card, CardContent, Typography, Chip,
   Stack, CircularProgress, IconButton, Tooltip,
@@ -16,10 +17,12 @@ import ExpandLessIcon     from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon     from "@mui/icons-material/ExpandMore";
 import DeleteOutlineIcon  from "@mui/icons-material/DeleteOutline";
 import CloseIcon          from "@mui/icons-material/Close";
+import EditIcon           from "@mui/icons-material/Edit";
+import SendIcon           from "@mui/icons-material/Send";
+import CampaignIcon       from "@mui/icons-material/Campaign";
 import { useAppTheme }    from "../AppThemeContext";
 
-const API_BASE    = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const SIDEBAR_KEY = "TrendSense_newsletter_sidebar_open";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 // ── Static newsletter copy — Tzunami branding ────────────────────────────────
 const CTA_URL = "https://booking.cloudsfer.com/meetings/book-tzunami/cloudsfer-sales-discovery-?uuid=9c89c0bf-3626-47ed-831c-f5e2a8ce1380";
@@ -581,18 +584,21 @@ const Newsletter = () => {
   const [selected,     setSelected]     = useState(null);
   const [loading,      setLoading]      = useState(true);
   const [dateFilter,   setDateFilter]   = useState("");
-  const [sidebarOpen,  setSidebarOpen]  = useState(() => {
-    try {
-      const stored = localStorage.getItem(SIDEBAR_KEY);
-      if (stored !== null) return stored !== "false";
-    } catch {}
-    return typeof window === "undefined" || window.innerWidth >= 960;
-  });
+  const [sidebarOpen,  setSidebarOpen]  = useState(
+    typeof window === "undefined" || window.innerWidth >= 960
+  );
+
+  // Load sidebar state from DB on mount
+  useEffect(() => {
+    getPref("nl_sidebar_open", null).then((val) => {
+      if (val !== null) setSidebarOpen(val !== "false");
+    });
+  }, []);
 
   const toggleSidebar = () => {
     setSidebarOpen((prev) => {
       const next = !prev;
-      try { localStorage.setItem(SIDEBAR_KEY, String(next)); } catch {}
+      setPref("nl_sidebar_open", String(next));
       return next;
     });
   };
@@ -824,7 +830,54 @@ const Newsletter = () => {
                     fontSize: { xs: "0.85rem", md: "0.95rem" } }}>
                     {selected.title}
                   </Typography>
-                  <CopyButton newsletter={selected} />
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <Tooltip title="Edit newsletter" placement="top">
+                      <IconButton
+                        size="small"
+                        sx={{
+                          color: "#94a3b8",
+                          border: "1px solid",
+                          borderColor: "#334155",
+                          borderRadius: 1,
+                          p: 0.6,
+                          "&:hover": { borderColor: "#3b82f6", color: "#3b82f6" },
+                        }}
+                      >
+                        <EditIcon sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Post newsletter" placement="top">
+                      <IconButton
+                        size="small"
+                        sx={{
+                          color: "#94a3b8",
+                          border: "1px solid",
+                          borderColor: "#334155",
+                          borderRadius: 1,
+                          p: 0.6,
+                          "&:hover": { borderColor: "#3b82f6", color: "#3b82f6" },
+                        }}
+                      >
+                        <SendIcon sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Post on campaign" placement="top">
+                      <IconButton
+                        size="small"
+                        sx={{
+                          color: "#94a3b8",
+                          border: "1px solid",
+                          borderColor: "#334155",
+                          borderRadius: 1,
+                          p: 0.6,
+                          "&:hover": { borderColor: "#3b82f6", color: "#3b82f6" },
+                        }}
+                      >
+                        <CampaignIcon sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </Tooltip>
+                    <CopyButton newsletter={selected} />
+                  </Box>
                 </Box>
 
                 <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: C.cardInner }}>

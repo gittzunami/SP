@@ -131,6 +131,8 @@ def delete_newsletter(newsletter_id: int = FPath(...), db: Session = Depends(get
 
 def _run_auto_scrape(task_id: str, keywords: list[str]) -> None:
     """Background task: scrape Google News for all keywords, then trigger webhook flow."""
+    from datetime import datetime, timezone
+    from db_models import TaskHistory
     import database as _db
     from scrapers.scrappa_google_news import run_google_news
 
@@ -146,6 +148,26 @@ def _run_auto_scrape(task_id: str, keywords: list[str]) -> None:
             "Auto-scrape completed for task %s — %d articles",
             task_id[:8], result.get("total_articles", 0),
         )
+        finished_at = datetime.now(tz=timezone.utc)
+        try:
+            from core.container import state
+            state.task_registry[task_id].update({
+                "status": "completed",
+                "finished_at": finished_at.isoformat(),
+                "result": result,
+            })
+        except Exception:
+            pass
+        try:
+            if db is not None:
+                row = db.query(TaskHistory).filter_by(task_id=task_id).first()
+                if row:
+                    row.status = "completed"
+                    row.finished_at = finished_at
+                    row.items_count = result.get("total_articles", 0) or 0
+                    db.commit()
+        except Exception as exc:
+            logger.warning("Could not mark auto-scrape task completed in DB: %s", exc)
     except Exception as exc:
         logger.error("Auto-scrape failed for task %s: %s", task_id[:8], exc)
     finally:
@@ -190,7 +212,7 @@ def auto_scrape_google_news(background_tasks: BackgroundTasks, db: Session = Dep
 
     try:
         db.add(TaskHistory(
-            task_id=task_id, scraper="google_news", status="pending_approval",
+            task_id=task_id, scraper="google_news", status="running",
             started_at=now, keyword=", ".join(keywords[:3]),
         ))
         db.commit()
@@ -201,7 +223,7 @@ def auto_scrape_google_news(background_tasks: BackgroundTasks, db: Session = Dep
     try:
         from core.container import state
         state.task_registry[task_id] = {
-            "task_id": task_id, "scraper": "google_news", "status": "pending_approval",
+            "task_id": task_id, "scraper": "google_news", "status": "running",
             "started_at": now.isoformat(), "finished_at": None,
             "result": None, "error": None,
         }

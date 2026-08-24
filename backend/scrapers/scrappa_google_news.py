@@ -257,7 +257,6 @@ def run_google_news(keywords: List[str], max_results: int = 50,
         "scraped_at":       scraped_at,
         "total_articles":   len(all_articles),
         "articles":         all_articles,
-        "_webhook_pending": True,
         "_scrappa_run_stats": {
             "requests_made":  total_requests,
             "articles_found": len(all_articles),

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { apiFetch } from "../api";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   Box, Typography, Button, Chip, Divider, IconButton,
   Collapse, Tooltip, Stack, Menu, MenuItem, ListItemIcon,
@@ -29,11 +29,9 @@ import CheckCircleIcon       from "@mui/icons-material/CheckCircle";
 import SearchIcon            from "@mui/icons-material/Search";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
 import { useAppTheme }       from "../AppThemeContext";
+import { getPref, setPref }  from "../core/api/preferences";
 
 const API_BASE       = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const SB_PROMPT_KEY  = "sbPrompt";
-const SB_RESULT_KEY  = "sbLastResult";   // set to "1" by FeedToSmartBrainModal as a redirect signal
-const SIDEBAR_KEY    = "sbSidebarOpen";
 const SIDEBAR_WIDTH  = 272;
 
 const PROVIDER_COLORS = { openai: "#10a37f", anthropic: "#d97757", gemini: "#4285f4" };
@@ -59,12 +57,6 @@ async function deleteFromDB(id) {
   } catch {}
 }
 
-function hasPending() {
-  return localStorage.getItem(SB_RESULT_KEY) === "1";
-}
-function clearPending() {
-  localStorage.removeItem(SB_RESULT_KEY);
-}
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 function formatDateTime(iso) {
@@ -320,6 +312,81 @@ function SbStatCardsRow({ text, recordCount, C, isDark }) {
 }
 
 const SB_TOPIC_CHIP_COLORS = ["#3b82f6","#7c3aed","#10b981","#f59e0b","#06b6d4","#ec4899","#a78bfa","#059669","#c2410c","#4338ca"];
+
+const SB_SOURCE_COLORS = {
+  facebook: "#1877f2",
+  reddit: "#ff4500",
+  twitter: "#1da1f2",
+  x: "#1da1f2",
+  instagram: "#e1306c",
+  tiktok: "#00f2fe",
+  "google news": "#4285f4",
+  googlenews: "#4285f4",
+  autodesk: "#0696d7",
+  edugeek: "#10b981",
+  spiceworks: "#f97316",
+  "stack exchange": "#f48024",
+  stackexchange: "#f48024",
+  quora: "#b92b27",
+  others: "#8b5cf6",
+  other: "#8b5cf6",
+};
+
+function SbSourcesDistribution({ lines, C, isDark, accent }) {
+  const parsed = [];
+  for (const line of lines) {
+    const t = line.trim();
+    const m = t.match(/^[-*]?\s*\*\*([^*]+)\*\*:\s*(\d+(?:\.\d+)?%?)/i) || t.match(/^[-*]?\s*([A-Za-z0-9\s]+)[:\-]\s*(\d+(?:\.\d+)?%?)/i);
+    if (m) {
+      const name = m[1].trim();
+      const rawVal = m[2].trim();
+      const num = parseFloat(rawVal.replace("%", "")) || 0;
+      const key = name.toLowerCase();
+      const color = SB_SOURCE_COLORS[key] || accent || "#8b5cf6";
+      parsed.push({ name, pct: num, label: rawVal.endsWith("%") ? rawVal : `${rawVal}%`, color });
+    }
+  }
+
+  if (!parsed.length) {
+    return <SbSectionContent lines={lines} C={C} isDark={isDark} accent={accent} />;
+  }
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, mt: 0.5 }}>
+      {parsed.map((item, i) => (
+        <Box key={i} sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: item.color, boxShadow: `0 0 6px ${item.color}88` }} />
+              <Typography sx={{ fontWeight: 700, fontSize: "0.85rem", color: C.text }}>
+                {item.name}
+              </Typography>
+            </Box>
+            <Typography sx={{ fontWeight: 800, fontSize: "0.85rem", color: item.color }}>
+              {item.label}
+            </Typography>
+          </Box>
+          <Box sx={{
+            height: 7,
+            borderRadius: 4,
+            bgcolor: isDark ? "#1f2937" : "#e5e7eb",
+            overflow: "hidden",
+            position: "relative",
+          }}>
+            <Box sx={{
+              height: "100%",
+              width: `${Math.min(100, Math.max(0, item.pct))}%`,
+              bgcolor: item.color,
+              borderRadius: 4,
+              transition: "width 0.8s cubic-bezier(0.34,1.56,0.64,1)",
+              boxShadow: `0 0 8px ${item.color}66`,
+            }} />
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  );
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  Smart Brain Grid Renderer — vivid cards, varied layout, strategy indicators
@@ -619,11 +686,12 @@ function SbSectionContent({ lines, C, isDark, accent }) {
 // Individual grid card — collapsible, hover lift + glow
 function SbSectionCard({ sec, idx, C, isDark }) {
   const [expanded, setExpanded] = useState(true);
-  const accent   = SB_PALETTE[idx % SB_PALETTE.length];
-  const isTopics = /key\s*topics?|main\s*topics?|topics?\s+identified|themes?|categories?/i.test(sec.title || "");
-  const mdSpan   = isTopics ? 12 : getSbSpan(idx);
-  const smFull   = mdSpan > 6;
-  const isHero   = idx === 0;
+  const accent    = SB_PALETTE[idx % SB_PALETTE.length];
+  const isTopics  = /key\s*topics?|main\s*topics?|topics?\s+identified|themes?|categories?/i.test(sec.title || "");
+  const isSources = /top\s*sources?|source\s*distribution|sources?\s*breakdown|data\s*sources?/i.test(sec.title || "");
+  const mdSpan    = isTopics || isSources ? 12 : getSbSpan(idx);
+  const smFull    = mdSpan > 6;
+  const isHero    = idx === 0;
 
   const topicNames = isTopics
     ? sec.lines.map(l => { const m = l.trim().match(/^[-*]\s+(.+)$/) || l.trim().match(/^\d+\.\s+(.+)$/); return m ? m[1].replace(/\*\*/g, "").trim() : null; }).filter(Boolean)
@@ -686,7 +754,7 @@ function SbSectionCard({ sec, idx, C, isDark }) {
         </Box>
       )}
 
-      {/* Card body — topics section gets chip rendering */}
+      {/* Card body */}
       <Collapse in={expanded}>
         <Box sx={{ px: isHero ? 2.5 : 2, py: isHero ? 2 : 1.5 }}>
           {isTopics && topicNames.length > 0 ? (
@@ -708,6 +776,8 @@ function SbSectionCard({ sec, idx, C, isDark }) {
                 );
               })}
             </Box>
+          ) : isSources ? (
+            <SbSourcesDistribution lines={sec.lines} C={C} isDark={isDark} accent={accent} />
           ) : (
             <SbSectionContent lines={sec.lines} C={C} isDark={isDark} accent={accent} />
           )}
@@ -1245,21 +1315,22 @@ const EmptyState = ({ C, navigate }) => (
 export default function SmartBrain() {
   const { C, isDark } = useAppTheme();
   const navigate       = useNavigate();
+  const location       = useLocation();
 
-  const [history,     setHistory]     = useState([]);
-  const [selectedId,  setSelectedId]  = useState(null);
-  const [dateFilter,  setDateFilter]  = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 600) return false;
-    try { return localStorage.getItem(SIDEBAR_KEY) !== "false"; } catch { return true; }
-  });
+  const [history,      setHistory]      = useState([]);
+  const [selectedId,   setSelectedId]   = useState(null);
+  const [dateFilter,   setDateFilter]   = useState("");
+  const [sidebarOpen,  setSidebarOpen]  = useState(
+    typeof window === "undefined" || window.innerWidth >= 600
+  );
 
   // Prompt section state
+  const [savedPrompts,      setSavedPrompts]      = useState([]);
   const [promptSectionOpen, setPromptSectionOpen] = useState(false);
-  const [promptText,  setPromptText]  = useState(() => localStorage.getItem(SB_PROMPT_KEY) || "");
-  const [promptSaved, setPromptSaved] = useState(!!localStorage.getItem(SB_PROMPT_KEY));
-  const [parsing,     setParsing]     = useState(false);
-  const [parseError,  setParseError]  = useState("");
+  const [promptText,        setPromptText]        = useState("");
+  const [promptSaved,       setPromptSaved]       = useState(false);
+  const [parsing,           setParsing]           = useState(false);
+  const [parseError,        setParseError]        = useState("");
   const fileRef = useRef(null);
 
   // View state
@@ -1268,24 +1339,43 @@ export default function SmartBrain() {
   const [headerMenuAnchor, setHeaderMenuAnchor] = useState(null);
   const [footerMenuAnchor, setFooterMenuAnchor] = useState(null);
 
-  // On mount: load history from DB
+  // Load preferences and saved prompts on mount
   useEffect(() => {
-    const pending = hasPending();
-    clearPending();
-    fetchHistoryFromDB().then(hist => {
+    getPref("sb_sidebar_open", null).then((val) => {
+      if (val !== null) setSidebarOpen(val !== "false");
+    });
+
+    apiFetch(`${API_BASE}/api/smart-brain/prompts`)
+      .then((r) => (r.ok ? r.json() : { prompts: [] }))
+      .then((d) => {
+        const list = d.prompts || [];
+        setSavedPrompts(list);
+        if (list.length > 0) {
+          setPromptText(list[0].text);
+          setPromptSaved(true);
+        }
+      });
+  }, []);
+
+  // Load analysis history from DB
+  useEffect(() => {
+    const pending = Boolean(location.state?.pending);
+    if (pending) {
+      window.history.replaceState({}, "");
+    }
+    fetchHistoryFromDB().then((hist) => {
       setHistory(hist);
       if (hist.length > 0) {
-        // If redirected from a fresh analysis, select the newest entry
-        setSelectedId(pending ? hist[0].id : hist[0].id);
+        setSelectedId(hist[0].id);
         if (pending) setPromptSectionOpen(false);
       }
     });
-  }, []);
+  }, [location.state]);
 
   const handleToggleSidebar = () => {
-    setSidebarOpen(prev => {
+    setSidebarOpen((prev) => {
       const next = !prev;
-      try { localStorage.setItem(SIDEBAR_KEY, String(next)); } catch {}
+      setPref("sb_sidebar_open", String(next));
       return next;
     });
   };
@@ -1298,20 +1388,32 @@ export default function SmartBrain() {
   };
 
   const handleDelete = (id) => {
-    const next = history.filter(h => h.id !== id);
+    const next = history.filter((h) => h.id !== id);
     setHistory(next);
     deleteFromDB(id);
     if (selectedId === id) setSelectedId(next.length > 0 ? next[0].id : null);
   };
 
   // Prompt handlers
-  const handleSavePrompt = () => {
-    localStorage.setItem(SB_PROMPT_KEY, promptText);
-    setPromptSaved(true);
+  const handleSavePrompt = async () => {
+    if (!promptText.trim()) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/api/smart-brain/prompts`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ text: promptText.trim() }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setSavedPrompts((prev) => [created, ...prev]);
+        setPromptSaved(true);
+      }
+    } catch {}
   };
+
   const handleClearPrompt = () => {
-    localStorage.removeItem(SB_PROMPT_KEY);
-    setPromptText(""); setPromptSaved(false);
+    setPromptText("");
+    setPromptSaved(false);
   };
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];

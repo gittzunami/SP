@@ -16,6 +16,9 @@ from .utility import (
     SmartBrainAnalysis,
 )
 
+from .user_preferences import UserPreferences
+from .saved_prompt import SavedPrompt
+
 from .spending import (
     ApiSpending,
     UserBudget,
@@ -64,6 +67,7 @@ __all__ = [
     # utility
     "ScrapeRun", "TaskHistory", "ScraperKeyword", "ScraperKeywordSelection",
     "FacebookGroup", "SmartBrainAnalysis",
+    "UserPreferences", "SavedPrompt",
     # spending
     "ApiSpending", "UserBudget", "BudgetAlertEmail", "ScraperBudget", "ScraperCostConfig",
     # llm

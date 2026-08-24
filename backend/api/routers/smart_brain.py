@@ -53,6 +53,7 @@ _LLM_STRIP_FIELDS: dict[str, set] = {
     "instagram":     {"likes", "comments_count"},
     "twitter":       {"retweets", "replies", "avatar"},
     "quora":         {"answer_count", "body"},
+    "facebook":      {"likes_count", "comments_count"},
 }
 
 
@@ -61,11 +62,12 @@ def _smart_brain_records_for_runs(db, runs, max_per_run: int = 100) -> list[dict
         _reddit_post_preview, _tiktok_post_preview, _edugeek_post_preview,
         _autodesk_post_preview, _se_question_preview, _gnews_preview,
         _instagram_post_preview, _spiceworks_preview, _twitter_tweet_preview,
-        _quora_question_preview,
+        _quora_question_preview, _facebook_post_preview,
     )
     from db_models import (
         RedditPost, TikTokPost, EduGeekPost, AutodeskPost, StackExchangeQuestion,
         GoogleNewsArticle, InstagramPost, SpiceworksPost, TwitterTweet, QuoraQuestion,
+        FacebookPost,
     )
     SOURCE_MAP = {
         "reddit":        (RedditPost,            _reddit_post_preview),
@@ -77,6 +79,7 @@ def _smart_brain_records_for_runs(db, runs, max_per_run: int = 100) -> list[dict
         "spiceworks":    (SpiceworksPost,        _spiceworks_preview),
         "twitter":       (TwitterTweet,          _twitter_tweet_preview),
         "quora":         (QuoraQuestion,         _quora_question_preview),
+        "facebook":      (FacebookPost,          _facebook_post_preview),
     }
     rows = []
     for run in runs:
@@ -372,3 +375,129 @@ def delete_smart_brain_analysis(entry_id: int = FPath(...), db: Session = Depend
     db.delete(entry)
     db.commit()
     return {"deleted": entry_id}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Saved Prompts — /api/smart-brain/prompts
+#  Each "Save Prompt" on the Smart Brain page creates a new row.
+#  The popup and Smart Brain page both read from this table.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class SavedPromptSchema(BaseModel):
+    text:  str
+    label: str = ""
+
+
+@router.get("/prompts")
+def list_saved_prompts(
+    limit: int = Query(100, le=500),
+    db:    Session = Depends(get_db),
+):
+    from db_models import SavedPrompt, Base
+    try:
+        rows = (
+            db.query(SavedPrompt)
+            .order_by(SavedPrompt.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+    except Exception:
+        db.rollback()
+        Base.metadata.create_all(bind=db.get_bind(), tables=[SavedPrompt.__table__])
+        rows = (
+            db.query(SavedPrompt)
+            .order_by(SavedPrompt.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+    return {
+        "prompts": [
+            {
+                "id":         r.id,
+                "text":       r.text,
+                "label":      r.label or "",
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+                "updated_at": r.updated_at.isoformat() if r.updated_at else "",
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.post("/prompts")
+def create_saved_prompt(
+    body: SavedPromptSchema,
+    db:   Session = Depends(get_db),
+):
+    from db_models import SavedPrompt, Base
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    prompt = SavedPrompt(
+        text       = body.text.strip(),
+        label      = body.label.strip() if body.label else None,
+        created_at = now,
+        updated_at = now,
+    )
+    try:
+        db.add(prompt)
+        db.commit()
+    except Exception:
+        db.rollback()
+        Base.metadata.create_all(bind=db.get_bind(), tables=[SavedPrompt.__table__])
+        db.add(prompt)
+        db.commit()
+
+    db.refresh(prompt)
+    return {
+        "id":         prompt.id,
+        "text":       prompt.text,
+        "label":      prompt.label or "",
+        "created_at": prompt.created_at.isoformat() if prompt.created_at else now.isoformat(),
+        "updated_at": prompt.updated_at.isoformat() if prompt.updated_at else now.isoformat(),
+    }
+
+
+@router.put("/prompts/{prompt_id}")
+def update_saved_prompt(
+    prompt_id: int = FPath(...),
+    body: SavedPromptSchema = Body(...),
+    db:   Session = Depends(get_db),
+):
+    from db_models import SavedPrompt, Base
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    try:
+        prompt = db.query(SavedPrompt).filter_by(id=prompt_id).first()
+    except Exception:
+        db.rollback()
+        Base.metadata.create_all(bind=db.get_bind(), tables=[SavedPrompt.__table__])
+        prompt = db.query(SavedPrompt).filter_by(id=prompt_id).first()
+
+    if not prompt:
+        raise HTTPException(404, "Prompt not found.")
+    prompt.text       = body.text.strip()
+    prompt.label      = body.label.strip() if body.label else None
+    prompt.updated_at = now
+    db.commit()
+    db.refresh(prompt)
+    return {
+        "id":         prompt.id,
+        "text":       prompt.text,
+        "label":      prompt.label or "",
+        "created_at": prompt.created_at.isoformat() if prompt.created_at else now.isoformat(),
+        "updated_at": prompt.updated_at.isoformat() if prompt.updated_at else now.isoformat(),
+    }
+
+
+@router.delete("/prompts/{prompt_id}")
+def delete_saved_prompt(
+    prompt_id: int = FPath(...),
+    db:        Session = Depends(get_db),
+):
+    from db_models import SavedPrompt
+    prompt = db.query(SavedPrompt).filter_by(id=prompt_id).first()
+    if not prompt:
+        raise HTTPException(404, "Prompt not found.")
+    db.delete(prompt)
+    db.commit()
+    return {"deleted": prompt_id}

@@ -83,7 +83,7 @@ def _j(value) -> Optional[str]:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _create_run(db: Session, scraper: str, payload: dict, task_id: str, batch_id: str = None) -> int:
+def _create_run(db: Session, scraper: str, payload: dict, task_id: str, batch_id: str = None, total_items: Optional[int] = None) -> int:
     """Insert a ScrapeRun audit row and return its id."""
     from db_models import ScrapeRun
 
@@ -92,10 +92,7 @@ def _create_run(db: Session, scraper: str, payload: dict, task_id: str, batch_id
         keyword = payload["keywords"][0] if payload["keywords"] else ""
     keyword = keyword.lower().strip()
 
-    run = ScrapeRun(
-        scraper     = scraper,
-        keyword     = keyword,
-        scraped_at  = _parse_dt(payload.get("scraped_at")) or datetime.now(tz=timezone.utc),
+    if total_items is None:
         total_items = (
             payload.get("total_posts")
             or payload.get("total_questions")
@@ -107,9 +104,15 @@ def _create_run(db: Session, scraper: str, payload: dict, task_id: str, batch_id
             or len(payload.get("articles",   []))
             or len(payload.get("tweets",     []))
             or 0
-        ),
-        task_id  = task_id,
-        batch_id = batch_id,
+        )
+
+    run = ScrapeRun(
+        scraper     = scraper,
+        keyword     = keyword,
+        scraped_at  = _parse_dt(payload.get("scraped_at")) or datetime.now(tz=timezone.utc),
+        total_items = total_items,
+        task_id     = task_id,
+        batch_id    = batch_id,
     )
     db.add(run)
     db.flush()
@@ -128,6 +131,8 @@ def save_reddit(db: Session, payload: dict, task_id: str = "",
     posts  = [p for p in payload.get("posts", []) if _after_since(p, cutoff, "created_at")]
     if not posts:
         logger.warning("Reddit: no posts in payload (after date filter)")
+        _create_run(db, "reddit", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "reddit", payload, task_id, batch_id=batch_id)
@@ -196,6 +201,8 @@ def save_tiktok(db: Session, payload: dict, task_id: str = "",
     posts = payload.get("posts", [])
     if not posts:
         logger.warning("TikTok: no posts in payload")
+        _create_run(db, "tiktok", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "tiktok", payload, task_id, batch_id=batch_id)
@@ -272,6 +279,8 @@ def save_edugeek(db: Session, payload: dict, task_id: str = "",
     }
     if not any(categories.values()):
         logger.warning("EduGeek: no items in payload (after date filter)")
+        _create_run(db, "edugeek", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "edugeek", payload, task_id, batch_id=batch_id)
@@ -335,6 +344,8 @@ def save_autodesk(db: Session, payload: dict, task_id: str = "",
     posts  = [p for p in payload.get("posts", []) if _after_since(p, cutoff, "created_at")]
     if not posts:
         logger.warning("Autodesk: no posts in payload (after date filter)")
+        _create_run(db, "autodesk", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "autodesk", payload, task_id, batch_id=batch_id)
@@ -411,6 +422,8 @@ def save_stackexchange(db: Session, payload: dict, task_id: str = "",
     questions = [q for q in payload.get("questions", []) if _after_since(q, cutoff, "created_at")]
     if not questions:
         logger.warning("StackExchange: no questions in payload (after date filter)")
+        _create_run(db, "stackexchange", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "stackexchange", payload, task_id, batch_id=batch_id)
@@ -517,6 +530,8 @@ def save_google_news(db: Session, payload: dict, task_id: str = "",
 
     if not articles:
         logger.warning("Google News: no articles in payload (after date filter)")
+        _create_run(db, "google_news", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "google_news", payload, task_id, batch_id=batch_id)
@@ -564,6 +579,8 @@ def save_instagram(db: Session, payload: dict, task_id: str = "",
     posts = payload.get("posts", [])
     if not posts:
         logger.warning("Instagram: no posts in payload")
+        _create_run(db, "instagram", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "instagram", payload, task_id, batch_id=batch_id)
@@ -626,6 +643,8 @@ def save_twitter(db: Session, payload: dict, task_id: str = "",
               if _after_since(t, cutoff, "created_at", "date", "createdAt")]
     if not tweets:
         logger.warning("Twitter: no tweets in payload (after date filter)")
+        _create_run(db, "twitter", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "twitter", payload, task_id, batch_id=batch_id)
@@ -686,6 +705,8 @@ def save_spiceworks(db: Session, payload: dict, task_id: str = "",
     posts  = [p for p in payload.get("posts", []) if _after_since(p, cutoff, "date")]
     if not posts:
         logger.warning("Spiceworks: no posts in payload (after date filter)")
+        _create_run(db, "spiceworks", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "spiceworks", payload, task_id, batch_id=batch_id)
@@ -730,6 +751,8 @@ def save_quora(db: Session, payload: dict, task_id: str = "",
     questions = payload.get("questions", [])
     if not questions:
         logger.warning("Quora: no questions in payload")
+        _create_run(db, "quora", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "quora", payload, task_id, batch_id=batch_id)
@@ -801,6 +824,8 @@ def save_facebook(db: Session, payload: dict, task_id: str = "",
     posts  = [p for p in payload.get("posts", []) if _after_since(p, cutoff, "created_at")]
     if not posts:
         logger.warning("Facebook: no posts in payload (after date filter)")
+        _create_run(db, "facebook", payload, task_id, batch_id=batch_id, total_items=0)
+        db.commit()
         return 0
 
     run_id = _create_run(db, "facebook", payload, task_id, batch_id=batch_id)

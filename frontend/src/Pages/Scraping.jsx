@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../api";
+import { getPref, setPref } from "../core/api/preferences";
 import {
   Box, Card, CardContent, Typography, Button, Switch,
   IconButton, Stack, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Chip, CircularProgress,
-  Alert, Snackbar, Tooltip, Tab, Tabs, Divider,
+  Alert, Snackbar, Tooltip, Tab, Tabs, Divider, InputAdornment,
 } from "@mui/material";
 import PlayArrow          from "@mui/icons-material/PlayArrow";
 import Warning            from "@mui/icons-material/Warning";
 import CheckCircle        from "@mui/icons-material/CheckCircle";
 import RadioButtonChecked from "@mui/icons-material/RadioButtonChecked";
-import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import CloseIcon          from "@mui/icons-material/Close";
 import BlockIcon          from "@mui/icons-material/Block";
+import Delete             from "@mui/icons-material/Delete";
 import CalendarTodayIcon  from "@mui/icons-material/CalendarToday";
 import LabelIcon          from "@mui/icons-material/Label";
 import HelpOutlineIcon    from "@mui/icons-material/HelpOutline";
@@ -43,12 +44,12 @@ const SCRAPER_DEFS = [
   {
     key: "autodesk", name: "Autodesk", endpoint: "/api/run/autodesk", pool: "shared",
     fields: [
-      { id: "max_posts", label: "Max Posts", type: "number", default: 20 },
+      { id: "max_posts", label: "Max Posts", type: "number", default: 50 },
     ],
     buildPayload: (fv, keyword, sinceDate) => ({
       keyword,
-      max_posts:     Number(fv.max_posts) || 20,
-      max_replies:   calcReplies(fv.max_posts),
+      max_posts:     Number(fv.max_posts) || 50,
+      max_replies:   calcReplies(fv.max_posts || 50),
       content_types: ["all"],
       ...(sinceDate ? { since_date: sinceDate } : {}),
     }),
@@ -56,12 +57,12 @@ const SCRAPER_DEFS = [
   {
     key: "edugeek", name: "EduGeek", endpoint: "/api/run/edugeek", pool: "shared",
     fields: [
-      { id: "max_items", label: "Max Items", type: "number", default: 20 },
+      { id: "max_items", label: "Max Items", type: "number", default: 50 },
     ],
     buildPayload: (fv, keyword, sinceDate) => ({
       keyword,
-      max_items:   Number(fv.max_items) || 20,
-      max_replies: calcReplies(fv.max_items),
+      max_items:   Number(fv.max_items) || 50,
+      max_replies: calcReplies(fv.max_items || 50),
       categories:  ["forums"],
       ...(sinceDate ? { since_date: sinceDate } : {}),
     }),
@@ -69,81 +70,81 @@ const SCRAPER_DEFS = [
   {
     key: "facebook", name: "Facebook Groups", endpoint: "/api/run/facebook", pool: "shared",
     fields: [
-      { id: "max_posts", label: "Max Posts", type: "number", default: 9 },
+      { id: "max_posts", label: "Max Posts", type: "number", default: 50 },
     ],
     // groupUrl is passed as 4th arg — comes from the per-card groups pool, not a form field
     buildPayload: (fv, keyword, sinceDate, groupUrl) => ({
       keyword,
       group_url:  groupUrl || "",
-      max_posts:  Number(fv.max_posts) || 9,
+      max_posts:  Number(fv.max_posts) || 50,
       ...(sinceDate ? { since_date: sinceDate } : {}),
     }),
   },
   {
     key: "google_news", name: "Google News", endpoint: "/api/run/google-news", pool: "google_news",
     fields: [
-      { id: "max_results", label: "Max Articles", type: "number", default: 20 },
+      { id: "max_results", label: "Max Articles", type: "number", default: 50 },
     ],
     buildPayload: (fv, keyword, sinceDate) => ({
       keywords:    [keyword],
-      max_results: Number(fv.max_results) || 20,
+      max_results: Number(fv.max_results) || 50,
       ...(sinceDate ? { since_date: sinceDate } : {}),
     }),
   },
   {
     key: "quora", name: "Quora", endpoint: "/api/run/quora", pool: "shared", noDate: true,
     fields: [
-      { id: "max_results", label: "Max Questions", type: "number", default: 20 },
+      { id: "max_results", label: "Max Questions", type: "number", default: 50 },
     ],
     buildPayload: (fv, keyword) => ({
       keyword,
-      max_results: Number(fv.max_results) || 20,
+      max_results: Number(fv.max_results) || 50,
     }),
   },
   {
     key: "reddit", name: "Reddit", endpoint: "/api/run/reddit", pool: "shared",
     fields: [
-      { id: "max_posts", label: "Max Posts", type: "number", default: 20 },
+      { id: "max_posts", label: "Max Posts", type: "number", default: 50 },
     ],
     buildPayload: (fv, keyword, sinceDate) => ({
       keyword,
-      max_posts:    Number(fv.max_posts) || 20,
-      max_comments: calcReplies(fv.max_posts),
+      max_posts:    Number(fv.max_posts) || 50,
+      max_comments: calcReplies(fv.max_posts || 50),
       ...(sinceDate ? { since_date: sinceDate } : {}),
     }),
   },
   {
     key: "spiceworks", name: "Spiceworks", endpoint: "/api/run/spiceworks", pool: "shared",
     fields: [
-      { id: "max_results", label: "Max Results", type: "number", default: 20 },
+      { id: "max_results", label: "Max Results", type: "number", default: 50 },
     ],
     buildPayload: (fv, keyword, sinceDate) => ({
       keyword,
-      max_results: Number(fv.max_results) || 20,
+      max_results: Number(fv.max_results) || 50,
       ...(sinceDate ? { since_date: sinceDate } : {}),
     }),
   },
   {
     key: "stackexchange", name: "StackExchange", endpoint: "/api/run/stackexchange", pool: "shared",
     fields: [
-      { id: "max_per_site", label: "Max Per Site", type: "number", default: 20 },
+      { id: "max_per_site", label: "Max Per Site", type: "number", default: 50 },
     ],
     buildPayload: (fv, keyword, sinceDate) => ({
       keyword,
       sites:        ["stackoverflow"],
-      max_per_site: Number(fv.max_per_site) || 20,
-      max_answers:  calcReplies(fv.max_per_site),
+      max_per_site: Number(fv.max_per_site) || 50,
+      max_answers:  calcReplies(fv.max_per_site || 50),
       ...(sinceDate ? { since_date: sinceDate } : {}),
     }),
   },
   {
     key: "twitter", name: "Twitter / X", endpoint: "/api/run/twitter", pool: "shared",
     fields: [
-      { id: "max_tweets", label: "Max Tweets", type: "number", default: 20 },
+      { id: "max_tweets", label: "Max Tweets", type: "number", default: 50 },
     ],
     buildPayload: (fv, keyword, sinceDate) => ({
       keywords:   [keyword],
-      max_tweets: Number(fv.max_tweets) || 20,
+      max_tweets: Number(fv.max_tweets) || 50,
       lang:       "en",
       ...(sinceDate ? { since_date: sinceDate } : {}),
     }),
@@ -153,7 +154,6 @@ const SCRAPER_DEFS = [
 const STATUS_META = {
   idle:              { label: "Idle",    color: "#64748b", bg: "#64748b20" },
   running:           { label: "Running", color: "#3b82f6", bg: "#3b82f620" },
-  pending_approval:  { label: "Awaiting Approval", color: "#f59e0b", bg: "#f59e0b20" },
   completed:         { label: "Done",    color: "#10b981", bg: "#10b98120" },
   failed:            { label: "Failed",  color: "#ef4444", bg: "#ef444420" },
   queued:            { label: "Queued",  color: "#f59e0b", bg: "#f59e0b20" },
@@ -179,21 +179,23 @@ const Scraping = () => {
   const [runDate,      setRunDate]      = useState(null);
   const [submitting,   setSubmitting]   = useState(false);
   const [toast,        setToast]        = useState({ open: false, msg: "", severity: "success" });
-  const [hasPending,   setHasPending]   = useState(false);
   const [scraperBlocks,setScraperBlocks]= useState({});
-  const [maxItems,     setMaxItems]     = useState(20);
+  const [maxItems,     setMaxItems]     = useState(50);
 
   // Keywords
-  const [keywords,    setKeywords]    = useState({ shared: [], google_news: [] });
+  const [keywords,    setKeywords]    = useState({ shared: [], google_news: [], auto: [] });
   const [selectedKws, setSelectedKws] = useState({});
 
   // Facebook Groups — persisted in DB
   const [fbGroups,    setFbGroups]    = useState([]);
   const [fbGroupsLoading, setFbGroupsLoading] = useState(false);
-  const [fbSelIds,    setFbSelIds]    = useState(() => {
-    try { return JSON.parse(localStorage.getItem("facebook_sel_groups_v1") || "[]"); }
-    catch { return []; }
-  });
+  const [fbSelIds,    setFbSelIds]    = useState([]);
+
+  useEffect(() => {
+    getPref("fb_selected_groups", "[]").then((raw) => {
+      try { setFbSelIds(JSON.parse(raw || "[]")); } catch {}
+    });
+  }, []);
   const [fbMgmtOpen,  setFbMgmtOpen]  = useState(false);
   const [fbNewName,   setFbNewName]   = useState("");
   const [fbNewUrl,    setFbNewUrl]    = useState("");
@@ -203,6 +205,12 @@ const Scraping = () => {
   const [kwSaving,      setKwSaving]      = useState(false);
   const [modalKwInputs, setModalKwInputs] = useState({ shared: "", google_news: "" });
   const [modalKwSaving, setModalKwSaving] = useState({ shared: false, google_news: false });
+
+  // Auto Facebook Groups
+  const [autoFbGroups,  setAutoFbGroups]  = useState([]);
+  const [autoFbNewName, setAutoFbNewName] = useState("");
+  const [autoFbNewUrl,  setAutoFbNewUrl]  = useState("");
+  const [autoFbSaving,  setAutoFbSaving]  = useState(false);
 
   const { isHardBlocked, budgetPct } = useBudget();
   const { addNotification } = useNotifications();
@@ -230,7 +238,7 @@ const Scraping = () => {
           for (const [key, data] of Object.entries(batchStatus)) {
             if (!next[key]) continue;
 
-            // Fix stuck running/queued state (but NOT pending_approval — that's genuine)
+            // Fix stuck running/queued state
             if (next[key].status === "running" || next[key].status === "queued") {
               next[key] = {
                 ...next[key],
@@ -253,21 +261,6 @@ const Scraping = () => {
       .catch(() => {});
   }, []);
 
-  // ── Pending newsletter jobs ───────────────────────────────────────────────
-  useEffect(() => {
-    const fetch_ = async () => {
-      try {
-        const res  = await apiFetch(`${API_BASE}/api/newsletter/pending`);
-        if (!res.ok) return;
-        const data = await res.json();
-        setHasPending((data.jobs || []).length > 0);
-      } catch (_) {}
-    };
-    fetch_();
-    const id = setInterval(fetch_, 10_000);
-    return () => clearInterval(id);
-  }, []);
-
   // ── Per-scraper budget blocks ─────────────────────────────────────────────
   useEffect(() => {
     const fetch_ = async () => {
@@ -287,14 +280,13 @@ const Scraping = () => {
   useEffect(() => {
     const id = setInterval(async () => {
       const active = Object.entries(cardsRef.current).filter(
-        ([, s]) => s.taskIds?.length > 0 && (s.status === "queued" || s.status === "running" || s.status === "pending_approval")
+        ([, s]) => s.taskIds?.length > 0 && (s.status === "queued" || s.status === "running")
       );
       if (!active.length) return;
       for (const [key, s] of active) {
         let completedCount = 0;
         let failedCount = 0;
         let runningCount = 0;
-        let pendingCount = 0;
         let latestError = null;
         let totalItems = 0;
         let itemsProcessed = 0;
@@ -323,8 +315,6 @@ const Scraping = () => {
             } else if (task.status === "failed") {
               failedCount++;
               latestError = task.error || "Run failed";
-            } else if (task.status === "pending_approval") {
-              pendingCount++;
             } else if (task.status === "queued" || task.status === "running") {
               runningCount++;
             }
@@ -335,14 +325,14 @@ const Scraping = () => {
                 notifiedRef.current.add(taskId);
                 addNotification({
                   title:   `${name} keyword completed`,
-                  message: task.result?.items_saved_to_db ?? task.result?.total_posts ?? task.result?.total_items ?? "Done",
-                  type: "success",
+                  message: `Task ${taskId.slice(0, 8)} finished successfully`,
+                  type:    "success",
                 });
               } else if (task.status === "failed") {
                 notifiedRef.current.add(taskId);
                 addNotification({
                   title:   `${name} keyword failed`,
-                  message: (task.error || "Failed — check logs").split("|||")[0],
+                  message: task.error || "Scraper encountered an error",
                   type:    "error",
                 });
               }
@@ -350,33 +340,47 @@ const Scraping = () => {
           } catch (_) {}
         }
 
-        // Determine overall card status
-        const patch = {};
-        if (totalItems > 0) patch.totalItems = totalItems;
-        if (itemsProcessed > 0) patch.itemsProcessed = itemsProcessed;
-        if (runningCount > 0) {
-          patch.status = "running";
-        } else if (pendingCount > 0) {
-          patch.status = "pending_approval";
-        } else if (failedCount === s.taskIds.length) {
-          patch.status = "failed";
-          patch.error = latestError;
-        } else if (completedCount + failedCount === s.taskIds.length) {
-          patch.status = completedCount > 0 ? "completed" : "failed";
-          if (patch.status === "failed") patch.error = latestError;
+        const totalTasks = s.taskIds.length;
+        if (completedCount + failedCount === totalTasks) {
+          const allFailed = failedCount === totalTasks;
+          setCards((prev) => ({
+            ...prev,
+            [key]: {
+              ...prev[key],
+              status:         allFailed ? "failed" : "completed",
+              lastRun:        lastFinishedAt ? new Date(lastFinishedAt).toLocaleString() : "Just now",
+              totalItems:     totalItems || prev[key].totalItems,
+              itemsProcessed: itemsProcessed || prev[key].itemsProcessed,
+              error:          allFailed ? latestError : null,
+              taskIds:        [],
+            },
+          }));
+        } else {
+          setCards((prev) => ({
+            ...prev,
+            [key]: {
+              ...prev[key],
+              status: "running",
+            },
+          }));
         }
-        if (lastFinishedAt) patch.lastRun = new Date(lastFinishedAt).toLocaleString();
-        updateCard(key, patch);
       }
-    }, 3000);
+    }, 2_000);
     return () => clearInterval(id);
-  }, [updateCard, addNotification]);
+  }, [addNotification]);
 
-  // ── Fetch saved keywords ──────────────────────────────────────────────────
+  // ── Fetch keywords ────────────────────────────────────────────────────────
   const fetchKeywords = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/keywords`);
-      if (res.ok) setKeywords(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setKeywords({
+          shared:      data.shared || [],
+          google_news: data.google_news || [],
+          auto:        data.auto || [],
+        });
+      }
     } catch {}
   }, []);
 
@@ -390,7 +394,60 @@ const Scraping = () => {
     } catch {}
   }, []);
 
-  useEffect(() => { fetchKeywords(); fetchSelections(); }, [fetchKeywords, fetchSelections]);
+  const fetchAutoFbGroups = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/facebook/groups?is_auto=true`);
+      if (res.ok) {
+        const data = await res.json();
+        setAutoFbGroups(data.groups || []);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchKeywords();
+    fetchSelections();
+    fetchAutoFbGroups();
+  }, [fetchKeywords, fetchSelections, fetchAutoFbGroups]);
+
+  const handleAddAutoFbGroup = async () => {
+    if (autoFbGroups.length >= 8) {
+      showToast("Maximum 8 auto Facebook groups allowed.", "error");
+      return;
+    }
+    const name = autoFbNewName.trim();
+    const url  = autoFbNewUrl.trim();
+    if (!name || !url) return;
+    setAutoFbSaving(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/facebook/groups`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ name, url, is_auto: true }),
+      });
+      if (res.ok) {
+        setAutoFbNewName("");
+        setAutoFbNewUrl("");
+        await fetchAutoFbGroups();
+        showToast(`Group "${name}" added to Auto Facebook Groups!`);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || "Failed to add group", "error");
+      }
+    } catch {} finally {
+      setAutoFbSaving(false);
+    }
+  };
+
+  const handleDeleteAutoFbGroup = async (id) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/facebook/groups/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setAutoFbGroups((prev) => prev.filter((g) => g.id !== id));
+        showToast("Auto Facebook group deleted.", "info");
+      }
+    } catch {}
+  };
 
   // ── Keyword helpers ───────────────────────────────────────────────────────
   const toggleKeyword = async (scraperKey, kwId) => {
@@ -418,8 +475,17 @@ const Scraping = () => {
   };
 
   const handleSaveKeywords = async (tab) => {
-    const kws = kwInput.split(",").map((k) => k.trim()).filter(Boolean);
+    let kws = kwInput.split(",").map((k) => k.trim()).filter(Boolean);
     if (!kws.length) return;
+    if (tab === "auto") {
+      const currentAuto = (keywords.auto || []).length;
+      const remainingSlots = Math.max(0, 8 - currentAuto);
+      if (remainingSlots <= 0) {
+        showToast("Maximum 8 auto keywords allowed.", "error");
+        return;
+      }
+      kws = kws.slice(0, remainingSlots);
+    }
     setKwSaving(true);
     try {
       const res = await apiFetch(`${API_BASE}/api/keywords`, {
@@ -431,18 +497,22 @@ const Scraping = () => {
         await fetchKeywords();
         setKwInput("");
         showToast(`${kws.length} keyword${kws.length !== 1 ? "s" : ""} saved!`);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || "Failed to save keywords", "error");
       }
     } catch {} finally { setKwSaving(false); }
   };
 
   const handleDeleteKeyword = async (id) => {
     try {
-      const allKws = [...keywords.shared, ...keywords.google_news];
+      const allKws = [...(keywords.shared || []), ...(keywords.google_news || []), ...(keywords.auto || [])];
       const deleted = allKws.find((k) => k.id === id);
       await apiFetch(`${API_BASE}/api/keywords/${id}`, { method: "DELETE" });
       setKeywords((prev) => ({
-        shared:      prev.shared.filter((k) => k.id !== id),
-        google_news: prev.google_news.filter((k) => k.id !== id),
+        shared:      (prev.shared || []).filter((k) => k.id !== id),
+        google_news: (prev.google_news || []).filter((k) => k.id !== id),
+        auto:        (prev.auto || []).filter((k) => k.id !== id),
       }));
       setSelectedKws((prev) => {
         const updated = {};
@@ -535,15 +605,19 @@ const Scraping = () => {
     setFbSelIds((prev) => {
       const pruned = prev.filter((id) => existingIds.has(id));
       if (pruned.length !== prev.length) {
-        try { localStorage.setItem("facebook_sel_groups_v1", JSON.stringify(pruned)); } catch {}
+        setPref("fb_selected_groups", JSON.stringify(pruned));
         return pruned;
       }
       return prev;
     });
   }, [fbGroups]);
 
+  const fbSaveTimerRef = useRef(null);
   useEffect(() => {
-    try { localStorage.setItem("facebook_sel_groups_v1", JSON.stringify(fbSelIds)); } catch {}
+    clearTimeout(fbSaveTimerRef.current);
+    fbSaveTimerRef.current = setTimeout(() => {
+      setPref("fb_selected_groups", JSON.stringify(fbSelIds));
+    }, 400);
   }, [fbSelIds]);
 
   const fbSelectedGroups = fbGroups.filter((g) => fbSelIds.includes(g.id));
@@ -624,7 +698,7 @@ const Scraping = () => {
     if (checkBudgetBlock()) return;
     const enabled = SCRAPER_DEFS.filter((d) => cards[d.key].enabled);
     if (enabled.length === 0) { showToast("No scrapers are enabled.", "warning"); return; }
-    setMaxItems(20);
+    setMaxItems(50);
     setRunDate(null);
     setModalKwInputs({ shared: "", google_news: "" });
     setModal({ open: true, mode: "all", scraperKey: null });
@@ -904,10 +978,9 @@ const Scraping = () => {
         {SCRAPER_DEFS.map((def) => {
           const s           = cards[def.key];
           const meta        = STATUS_META[s.status] || STATUS_META.idle;
-          const isRunning   = s.status === "queued" || s.status === "running" || s.status === "pending_approval";
+          const isRunning   = s.status === "queued" || s.status === "running";
           const blocked     = isScraperBlocked(def.key);
           const blockReason = getBlockReason(def.key);
-          const showPending = def.key === "google_news" && hasPending;
 
           return (
             <Card key={def.key} sx={{
@@ -956,17 +1029,6 @@ const Scraping = () => {
                     sx={{ bgcolor: meta.bg, color: meta.color, fontWeight: 600, fontSize: "0.7rem" }}
                   />
                 </Box>
-
-                {showPending && (
-                  <Box sx={{ p: 1.5, bgcolor: "rgba(168,85,247,0.08)",
-                    border: "1px solid rgba(168,85,247,0.25)", borderRadius: 2, mb: 2,
-                    display: "flex", alignItems: "center", gap: 1 }}>
-                    <HourglassEmptyIcon sx={{ color: "#a855f7", fontSize: 14 }} />
-                    <Typography variant="caption" sx={{ color: "#d8b4fe" }}>
-                      Newsletter pending approval — collection can still run
-                    </Typography>
-                  </Box>
-                )}
 
                 {s.error && (() => {
                   const [short, detail] = s.error.split("|||");
@@ -1472,7 +1534,7 @@ const Scraping = () => {
 
         <Tabs
           value={kwModal.tab}
-          onChange={(_, v) => setKwModal((prev) => ({ ...prev, tab: v }))}
+          onChange={(_, v) => { setKwModal((prev) => ({ ...prev, tab: v })); setKwInput(""); }}
           sx={{
             px: 2, borderBottom: `1px solid ${C.border}`,
             "& .MuiTab-root":    { color: C.textMuted, textTransform: "none", fontSize: "0.85rem" },
@@ -1480,38 +1542,81 @@ const Scraping = () => {
             "& .MuiTabs-indicator": { bgcolor: "#3b82f6" },
           }}
         >
-          <Tab value="shared"     label="All Collectors" />
+          <Tab value="shared"      label="All Collectors" />
           <Tab value="google_news" label="Google News" />
+          <Tab value="auto"        label={`Auto Keywords (${(keywords.auto || []).length}/8)`} />
         </Tabs>
 
         <DialogContent>
           <Typography variant="caption" sx={{ color: C.textMuted, display: "block", mb: 1.5 }}>
             {kwModal.tab === "shared"
               ? "Shared across Reddit, EduGeek, StackExchange, Autodesk, Twitter, Spiceworks, Quora."
-              : "Used only for Google News collection."}
+              : kwModal.tab === "google_news"
+              ? "Used only for Google News collection."
+              : "Used exclusively for background Auto-Scrape Webhooks across all 8 scrapers (Max 8 keywords)."}
           </Typography>
+
+          {kwModal.tab === "auto" && (keywords.auto || []).length >= 8 && (
+            <Alert severity="warning" icon={<BlockIcon fontSize="small" />} sx={{ mb: 1.5, py: 0.25, fontSize: "0.78rem" }}>
+              Maximum 8 auto keywords reached. Delete an existing keyword to add another.
+            </Alert>
+          )}
 
           <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
             <TextField
               fullWidth size="small"
-              placeholder="Add keywords (comma-separated)"
-              value={kwInput}
-              onChange={(e) => setKwInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleSaveKeywords(kwModal.tab); }}
+              placeholder={
+                kwModal.tab === "auto" && (keywords.auto || []).length >= 8
+                  ? "Limit reached (8/8) — delete a keyword to add more"
+                  : "Add keywords (comma-separated)"
+              }
+              value={kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? "" : kwInput}
+              disabled={kwModal.tab === "auto" && (keywords.auto || []).length >= 8}
+              onChange={(e) => {
+                if (kwModal.tab === "auto" && (keywords.auto || []).length >= 8) return;
+                setKwInput(e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (kwModal.tab === "auto" && (keywords.auto || []).length >= 8) return;
+                if (e.key === "Enter") handleSaveKeywords(kwModal.tab);
+              }}
+              InputProps={{
+                startAdornment: kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? (
+                  <InputAdornment position="start">
+                    <Tooltip title="Maximum 8 keywords reached. Delete an existing keyword to add new ones.">
+                      <BlockIcon sx={{ color: "#ef4444", fontSize: 20 }} />
+                    </Tooltip>
+                  </InputAdornment>
+                ) : null,
+              }}
               sx={{
                 "& .MuiOutlinedInput-root": {
                   color: C.text, bgcolor: C.inputBg,
                   "& fieldset": { borderColor: C.border },
                   "&:hover fieldset": { borderColor: "#3b82f6" },
                   "&.Mui-focused fieldset": { borderColor: "#3b82f6" },
+                  "&.Mui-disabled": {
+                    bgcolor: (keywords.auto || []).length >= 8 && kwModal.tab === "auto"
+                      ? (C.cardInner || "#1e293b")
+                      : C.inputBg,
+                    cursor: "not-allowed",
+                    "& fieldset": { borderColor: kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? "#ef444480" : C.border },
+                  },
                 },
-                "& .MuiInputBase-input": { color: C.text },
+                "& .MuiInputBase-input": {
+                  color: C.text,
+                  "&.Mui-disabled": {
+                    cursor: "not-allowed",
+                    WebkitTextFillColor: kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? (C.textMuted || "#9ca3af") : "inherit",
+                  },
+                },
               }}
             />
             <Button
               variant="contained"
               onClick={() => handleSaveKeywords(kwModal.tab)}
-              disabled={kwSaving || !kwInput.trim()}
+              disabled={kwSaving || !kwInput.trim() || (kwModal.tab === "auto" && (keywords.auto || []).length >= 8)}
+              startIcon={kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? <BlockIcon /> : null}
               sx={{
                 bgcolor: "#3b82f6", textTransform: "none", whiteSpace: "nowrap",
                 "&:hover": { bgcolor: "#2563eb" },
@@ -1523,26 +1628,172 @@ const Scraping = () => {
           </Stack>
 
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, minHeight: 32 }}>
-            {(kwModal.tab === "shared" ? keywords.shared : keywords.google_news).length === 0 ? (
+            {((keywords[kwModal.tab] || []).length === 0) ? (
               <Typography variant="caption" sx={{ color: C.textMuted }}>
                 No keywords yet — type above and click Save.
               </Typography>
             ) : (
-              [...(kwModal.tab === "shared" ? keywords.shared : keywords.google_news)].sort((a, b) => a.keyword.localeCompare(b.keyword)).map((kw) => (
+              [...(keywords[kwModal.tab] || [])].sort((a, b) => a.keyword.localeCompare(b.keyword)).map((kw) => (
                 <Chip
                   key={kw.id}
                   label={kw.keyword}
                   onDelete={() => handleDeleteKeyword(kw.id)}
                   size="small"
                   sx={{
-                    bgcolor: C.cardInner, color: C.text,
-                    border: `1px solid ${C.border}`,
+                    bgcolor: kwModal.tab === "auto" ? (C.cardInner || "#1e293b") : C.cardInner,
+                    color: C.text,
+                    border: `1px solid ${kwModal.tab === "auto" ? "#3b82f650" : C.border}`,
                     "& .MuiChip-deleteIcon": { color: C.textMuted, "&:hover": { color: "#ef4444" } },
                   }}
                 />
               ))
             )}
           </Box>
+
+          {kwModal.tab === "auto" && (
+            <>
+              <Divider sx={{ my: 2.5, borderColor: C.border }} />
+
+              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 0.5 }}>
+                <Typography variant="subtitle2" sx={{ color: C.text, fontWeight: 700, fontSize: "0.85rem" }}>
+                  Auto Facebook Groups ({autoFbGroups.length}/8)
+                </Typography>
+              </Box>
+
+              <Typography variant="caption" sx={{ color: C.textMuted, display: "block", mb: 1.5 }}>
+                Facebook groups used exclusively for background Auto-Scrape Webhooks (Max 8 groups).
+              </Typography>
+
+              {autoFbGroups.length >= 8 && (
+                <Alert severity="warning" icon={<BlockIcon fontSize="small" />} sx={{ mb: 1.5, py: 0.25, fontSize: "0.78rem" }}>
+                  Maximum 8 auto Facebook groups reached. Delete an existing group to add another.
+                </Alert>
+              )}
+
+              <Stack spacing={1} sx={{ mb: 2 }}>
+                <TextField
+                  size="small" fullWidth
+                  label="Group Name"
+                  placeholder={autoFbGroups.length >= 8 ? "Limit reached (8/8)" : "e.g. IT Professionals"}
+                  value={autoFbGroups.length >= 8 ? "" : autoFbNewName}
+                  disabled={autoFbGroups.length >= 8}
+                  onChange={(e) => {
+                    if (autoFbGroups.length >= 8) return;
+                    setAutoFbNewName(e.target.value);
+                  }}
+                  sx={{
+                    "& .MuiOutlinedInput-root": {
+                      color: C.text, bgcolor: C.inputBg,
+                      "& fieldset": { borderColor: C.border },
+                      "&:hover fieldset": { borderColor: "#3b82f6" },
+                      "&.Mui-focused fieldset": { borderColor: "#3b82f6" },
+                      "&.Mui-disabled": {
+                        bgcolor: autoFbGroups.length >= 8 ? (C.cardInner || "#1e293b") : C.inputBg,
+                        cursor: "not-allowed",
+                        "& fieldset": { borderColor: autoFbGroups.length >= 8 ? "#ef444480" : C.border },
+                      },
+                    },
+                    "& .MuiInputBase-input": {
+                      color: C.text,
+                      "&.Mui-disabled": {
+                        cursor: "not-allowed",
+                        WebkitTextFillColor: autoFbGroups.length >= 8 ? (C.textMuted || "#9ca3af") : "inherit",
+                      },
+                    },
+                  }}
+                  InputLabelProps={{ style: { color: C.textSub } }}
+                />
+                <TextField
+                  size="small" fullWidth
+                  label="Group URL *"
+                  placeholder={autoFbGroups.length >= 8 ? "Limit reached (8/8)" : "https://www.facebook.com/groups/..."}
+                  value={autoFbGroups.length >= 8 ? "" : autoFbNewUrl}
+                  disabled={autoFbGroups.length >= 8}
+                  onChange={(e) => {
+                    if (autoFbGroups.length >= 8) return;
+                    setAutoFbNewUrl(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (autoFbGroups.length >= 8) return;
+                    if (e.key === "Enter") handleAddAutoFbGroup();
+                  }}
+                  InputProps={{
+                    startAdornment: autoFbGroups.length >= 8 ? (
+                      <InputAdornment position="start">
+                        <Tooltip title="Maximum 8 groups reached. Delete an existing group to add new ones.">
+                          <BlockIcon sx={{ color: "#ef4444", fontSize: 20 }} />
+                        </Tooltip>
+                      </InputAdornment>
+                    ) : null,
+                  }}
+                  sx={{
+                    "& .MuiOutlinedInput-root": {
+                      color: C.text, bgcolor: C.inputBg,
+                      "& fieldset": { borderColor: C.border },
+                      "&:hover fieldset": { borderColor: "#3b82f6" },
+                      "&.Mui-focused fieldset": { borderColor: "#3b82f6" },
+                      "&.Mui-disabled": {
+                        bgcolor: autoFbGroups.length >= 8 ? (C.cardInner || "#1e293b") : C.inputBg,
+                        cursor: "not-allowed",
+                        "& fieldset": { borderColor: autoFbGroups.length >= 8 ? "#ef444480" : C.border },
+                      },
+                    },
+                    "& .MuiInputBase-input": {
+                      color: C.text,
+                      "&.Mui-disabled": {
+                        cursor: "not-allowed",
+                        WebkitTextFillColor: autoFbGroups.length >= 8 ? (C.textMuted || "#9ca3af") : "inherit",
+                      },
+                    },
+                  }}
+                  InputLabelProps={{ style: { color: C.textSub } }}
+                />
+                <Button
+                  variant="contained" size="small"
+                  disabled={autoFbSaving || !autoFbNewName.trim() || !autoFbNewUrl.trim() || autoFbGroups.length >= 8}
+                  onClick={handleAddAutoFbGroup}
+                  startIcon={autoFbGroups.length >= 8 ? <BlockIcon /> : null}
+                  sx={{
+                    bgcolor: "#3b82f6", textTransform: "none", alignSelf: "flex-start",
+                    "&:hover": { bgcolor: "#2563eb" },
+                    "&.Mui-disabled": { bgcolor: C.cardInner, color: C.textMuted },
+                  }}
+                >
+                  {autoFbSaving ? <CircularProgress size={14} sx={{ color: "inherit" }} /> : "Add Group"}
+                </Button>
+              </Stack>
+
+              <Stack spacing={0.75} sx={{ maxHeight: 180, overflowY: "auto", pr: 0.5 }}>
+                {autoFbGroups.length === 0 ? (
+                  <Typography variant="caption" sx={{ color: C.textMuted }}>
+                    No auto Facebook groups added yet.
+                  </Typography>
+                ) : (
+                  autoFbGroups.map((g) => (
+                    <Box
+                      key={g.id}
+                      sx={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        p: 1, borderRadius: 1.5, bgcolor: C.cardInner, border: `1px solid ${C.border}`,
+                      }}
+                    >
+                      <Box sx={{ minWidth: 0, mr: 1 }}>
+                        <Typography variant="body2" sx={{ color: C.text, fontWeight: 600, fontSize: "0.82rem", noWrap: true }}>
+                          {g.name}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.72rem", display: "block", noWrap: true }}>
+                          {g.url}
+                        </Typography>
+                      </Box>
+                      <IconButton size="small" onClick={() => handleDeleteAutoFbGroup(g.id)} sx={{ color: C.textMuted, "&:hover": { color: "#ef4444" } }}>
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  ))
+                )}
+              </Stack>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

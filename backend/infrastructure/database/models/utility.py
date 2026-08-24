@@ -57,10 +57,11 @@ if DB_AVAILABLE:
 
     class FacebookGroup(Base):
         __tablename__  = "facebook_groups"
-        __table_args__ = (UniqueConstraint("url", name="uq_facebook_group_url"),)
+        __table_args__ = (UniqueConstraint("url", "is_auto", name="uq_facebook_group_url_is_auto"),)
         id         = Column(Integer,     primary_key=True)
         name       = Column(String(300), nullable=False)
         url        = Column(Text,        nullable=False)
+        is_auto    = Column(Boolean,     default=False, nullable=False)
         created_at = Column(DateTime(timezone=True))
 
     class SmartBrainAnalysis(Base):

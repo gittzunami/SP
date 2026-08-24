@@ -30,34 +30,34 @@ _STACKAPPS_KEY      = os.environ.get("STACKAPPS_KEY",      "")
 
 # ── Scraper defaults ──────────────────────────────────────────────────────────
 
-_REDDIT_MAX_POSTS    = 20
+_REDDIT_MAX_POSTS    = 50
 _REDDIT_MAX_COMMENTS = 50
 _REDDIT_SORT         = "relevance"
 _REDDIT_TIME_FILTER  = "all"
 
-_TIKTOK_MAX_POSTS    = 20
+_TIKTOK_MAX_POSTS    = 50
 _TIKTOK_MAX_COMMENTS = 50
 
-_EDUGEEK_MAX_ITEMS   = 20
+_EDUGEEK_MAX_ITEMS   = 50
 _EDUGEEK_MAX_REPLIES = 50
 _EDUGEEK_CATEGORIES  = ["forums"]
 
 _SE_SITES        = ["stackoverflow"]
-_SE_MAX_PER_SITE = 20
+_SE_MAX_PER_SITE = 50
 _SE_MAX_ANSWERS  = 50
 _SE_MAX_COMMENTS = 50
 
-_AUTODESK_MAX_POSTS     = 20
+_AUTODESK_MAX_POSTS     = 50
 _AUTODESK_MAX_REPLIES   = 50
 _AUTODESK_CONTENT_TYPES = ["all"]
 
-_TWITTER_MAX_TWEETS = 20
+_TWITTER_MAX_TWEETS = 50
 _TWITTER_LANG       = "en"
 
-_INSTAGRAM_RESULTS_LIMIT = 20
+_INSTAGRAM_RESULTS_LIMIT = 50
 _GOOGLE_NEWS_MAX_RESULTS = 50
-_QUORA_MAX_RESULTS       = 20
-_FACEBOOK_MAX_POSTS      = 9
+_QUORA_MAX_RESULTS       = 50
+_FACEBOOK_MAX_POSTS      = 50
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -184,7 +184,7 @@ class GoogleNewsConfig(BaseModel):
 
 class SpiceworksConfig(BaseModel):
     keyword:     str
-    max_results: int = Field(default=20, ge=1)
+    max_results: int = Field(default=50, ge=1)
     since_date:  Optional[str] = Field(default=None, description="ISO date string")
     schedule:    ScheduleInterval = "manual"
     batch_id:    Optional[str] = Field(default=None, description="Batch ID for grouping multi-keyword runs")

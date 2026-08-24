@@ -21,6 +21,8 @@ from infrastructure.database.models import (  # noqa: F401
     ScraperKeywordSelection,
     FacebookGroup,
     SmartBrainAnalysis,
+    UserPreferences,
+    SavedPrompt,
     # spending
     ApiSpending,
     UserBudget,

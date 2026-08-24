@@ -34,9 +34,9 @@ import Delete from "@mui/icons-material/Delete";
 import Add    from "@mui/icons-material/Add";
 import { useAppTheme }      from "../AppThemeContext";
 import { useNotifications } from "../NotificationContext";
+import { getPref, setPref, clearAllPrefs } from "../core/api/preferences";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const LS_KEY   = "TrendSense_general_settings";
 
 const PROVIDER_LABELS = {
   openai:    "OpenAI API",
@@ -68,14 +68,17 @@ const Settings = () => {
   const { mode, setMode, C } = useAppTheme();
   const { addNotification }  = useNotifications();
 
-  const [settings, setSettings] = useState(() => {
-    try {
-      const saved = localStorage.getItem(LS_KEY);
-      return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
-    } catch {
-      return DEFAULT_SETTINGS;
-    }
-  });
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    getPref("general_settings", null).then((saved) => {
+      if (saved) {
+        try {
+          setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(saved) });
+        } catch {}
+      }
+    });
+  }, []);
 
   const [apiKeys,     setApiKeys]     = useState([]);
   const [loadingKeys, setLoadingKeys] = useState(true);
@@ -129,7 +132,7 @@ const Settings = () => {
   const handleSave = async () => {
     setSaving(true);
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify(settings));
+      await setPref("general_settings", JSON.stringify(settings));
       const res = await apiFetch(`${API_BASE}/api/spending/budget`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
@@ -206,14 +209,16 @@ const Settings = () => {
     setDangerLoading(true);
     try {
       if (dangerTarget === "cache") {
-        ["TrendSense_notifications_v1", LS_KEY].forEach((k) => localStorage.removeItem(k));
+        await clearAllPrefs();
+        try { localStorage.removeItem("TrendSense_notifications_v1"); } catch {}
         showSnack("Cache cleared");
       } else if (dangerTarget === "reset") {
-        localStorage.removeItem(LS_KEY);
+        await setPref("general_settings", JSON.stringify(DEFAULT_SETTINGS));
         setSettings(DEFAULT_SETTINGS);
         showSnack("Settings reset to defaults");
       } else if (dangerTarget === "delete") {
-        localStorage.clear();
+        await clearAllPrefs();
+        try { localStorage.removeItem("TrendSense_notifications_v1"); } catch {}
         setSettings(DEFAULT_SETTINGS);
         showSnack("Account data deleted");
       }

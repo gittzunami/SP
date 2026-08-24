@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
 import { ThemeProvider, createTheme, CssBaseline } from "@mui/material";
+import { getPref, setPref } from "./core/api/preferences";
 
-const LS_KEY = "TrendSense_theme_mode";
 
 // ── Color token palettes ──────────────────────────────────────────────────────
 
@@ -47,9 +47,16 @@ const AppThemeContext = createContext({
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function AppThemeProvider({ children }) {
-  const [mode, setModeRaw] = useState(() => {
-    try { return localStorage.getItem(LS_KEY) || "dark"; } catch { return "dark"; }
-  });
+  const [mode, setModeRaw] = useState("dark"); // default until DB loads
+  const [themeLoaded, setThemeLoaded] = useState(false);
+
+  // Load persisted theme from DB on mount
+  useEffect(() => {
+    getPref("theme_mode", "dark").then((val) => {
+      setModeRaw(val || "dark");
+      setThemeLoaded(true);
+    });
+  }, []);
 
   // Track OS dark-preference for "auto" mode
   const [sysDark, setSysDark] = useState(
@@ -64,7 +71,7 @@ export function AppThemeProvider({ children }) {
   }, []);
 
   const setMode = (m) => {
-    try { localStorage.setItem(LS_KEY, m); } catch {}
+    setPref("theme_mode", m);
     setModeRaw(m);
   };
 

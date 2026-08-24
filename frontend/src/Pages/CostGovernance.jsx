@@ -19,6 +19,7 @@ import AttachMoneyIcon   from "@mui/icons-material/AttachMoney";
 
 import { useBudget, EMAIL_ALERT_THRESHOLD, HARD_BLOCK_THRESHOLD } from "../BudgetContext";
 import { useAppTheme } from "../AppThemeContext";
+import { getPref, setPref } from "../core/api/preferences";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
@@ -74,7 +75,7 @@ const LLM_PROVIDER_LABELS = {
   gemini:    "Gemini",
 };
 
-const ALLOC_KEY = "TrendSense_budget_alloc_v3";
+// ALLOC_KEY removed — allocations cached via /api/preferences (db-backed)
 
 function defaultAllocations(total) {
   const each = parseFloat((total / PAID_TOOLS.length).toFixed(2));
@@ -85,14 +86,12 @@ function defaultAllocations(total) {
 }
 
 function loadAllocations(total) {
-  try {
-    const raw = localStorage.getItem(ALLOC_KEY);
-    return raw ? JSON.parse(raw) : defaultAllocations(total);
-  } catch { return defaultAllocations(total); }
+  // allocations are now read from the backend (data.scraper_budgets) or defaulted
+  return defaultAllocations(total);
 }
 
-function saveAllocations(a) {
-  try { localStorage.setItem(ALLOC_KEY, JSON.stringify(a)); } catch {}
+async function saveAllocations(a) {
+  await setPref("scraper_allocations", JSON.stringify(a));
 }
 
 const fmt = (n) => {
@@ -296,7 +295,7 @@ const CostGovernance = () => {
         throw new Error(b.detail || `HTTP ${scraperBudgetRes.status}`);
       }
 
-      saveAllocations(allocations);
+      await saveAllocations(allocations);
 
       const emailRes = await apiFetch(`${API_BASE}/api/spending/alert-emails`, {
         method: "POST", headers: { "Content-Type": "application/json" },
