@@ -411,10 +411,6 @@ const Scraping = () => {
   }, [fetchKeywords, fetchSelections, fetchAutoFbGroups]);
 
   const handleAddAutoFbGroup = async () => {
-    if (autoFbGroups.length >= 8) {
-      showToast("Maximum 8 auto Facebook groups allowed.", "error");
-      return;
-    }
     const name = autoFbNewName.trim();
     const url  = autoFbNewUrl.trim();
     if (!name || !url) return;
@@ -477,15 +473,6 @@ const Scraping = () => {
   const handleSaveKeywords = async (tab) => {
     let kws = kwInput.split(",").map((k) => k.trim()).filter(Boolean);
     if (!kws.length) return;
-    if (tab === "auto") {
-      const currentAuto = (keywords.auto || []).length;
-      const remainingSlots = Math.max(0, 8 - currentAuto);
-      if (remainingSlots <= 0) {
-        showToast("Maximum 8 auto keywords allowed.", "error");
-        return;
-      }
-      kws = kws.slice(0, remainingSlots);
-    }
     setKwSaving(true);
     try {
       const res = await apiFetch(`${API_BASE}/api/keywords`, {
@@ -1544,7 +1531,7 @@ const Scraping = () => {
         >
           <Tab value="shared"      label="All Collectors" />
           <Tab value="google_news" label="Google News" />
-          <Tab value="auto"        label={`Auto Keywords (${(keywords.auto || []).length}/8)`} />
+          <Tab value="auto"        label={`Auto Keywords (${(keywords.auto || []).length})`} />
         </Tabs>
 
         <DialogContent>
@@ -1553,41 +1540,18 @@ const Scraping = () => {
               ? "Shared across Reddit, EduGeek, StackExchange, Autodesk, Twitter, Spiceworks, Quora."
               : kwModal.tab === "google_news"
               ? "Used only for Google News collection."
-              : "Used exclusively for background Auto-Scrape Webhooks across all 8 scrapers (Max 8 keywords)."}
+              : "Used exclusively for background Auto-Scrape Webhooks across all 8 scrapers."}
           </Typography>
-
-          {kwModal.tab === "auto" && (keywords.auto || []).length >= 8 && (
-            <Alert severity="warning" icon={<BlockIcon fontSize="small" />} sx={{ mb: 1.5, py: 0.25, fontSize: "0.78rem" }}>
-              Maximum 8 auto keywords reached. Delete an existing keyword to add another.
-            </Alert>
-          )}
 
           <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
             <TextField
               fullWidth size="small"
-              placeholder={
-                kwModal.tab === "auto" && (keywords.auto || []).length >= 8
-                  ? "Limit reached (8/8) — delete a keyword to add more"
-                  : "Add keywords (comma-separated)"
-              }
-              value={kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? "" : kwInput}
-              disabled={kwModal.tab === "auto" && (keywords.auto || []).length >= 8}
-              onChange={(e) => {
-                if (kwModal.tab === "auto" && (keywords.auto || []).length >= 8) return;
-                setKwInput(e.target.value);
-              }}
+              placeholder="Add keywords (comma-separated)"
+              value={kwInput}
+              disabled={kwSaving}
+              onChange={(e) => setKwInput(e.target.value)}
               onKeyDown={(e) => {
-                if (kwModal.tab === "auto" && (keywords.auto || []).length >= 8) return;
                 if (e.key === "Enter") handleSaveKeywords(kwModal.tab);
-              }}
-              InputProps={{
-                startAdornment: kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? (
-                  <InputAdornment position="start">
-                    <Tooltip title="Maximum 8 keywords reached. Delete an existing keyword to add new ones.">
-                      <BlockIcon sx={{ color: "#ef4444", fontSize: 20 }} />
-                    </Tooltip>
-                  </InputAdornment>
-                ) : null,
               }}
               sx={{
                 "& .MuiOutlinedInput-root": {
@@ -1595,28 +1559,14 @@ const Scraping = () => {
                   "& fieldset": { borderColor: C.border },
                   "&:hover fieldset": { borderColor: "#3b82f6" },
                   "&.Mui-focused fieldset": { borderColor: "#3b82f6" },
-                  "&.Mui-disabled": {
-                    bgcolor: (keywords.auto || []).length >= 8 && kwModal.tab === "auto"
-                      ? (C.cardInner || "#1e293b")
-                      : C.inputBg,
-                    cursor: "not-allowed",
-                    "& fieldset": { borderColor: kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? "#ef444480" : C.border },
-                  },
                 },
-                "& .MuiInputBase-input": {
-                  color: C.text,
-                  "&.Mui-disabled": {
-                    cursor: "not-allowed",
-                    WebkitTextFillColor: kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? (C.textMuted || "#9ca3af") : "inherit",
-                  },
-                },
+                "& .MuiInputBase-input": { color: C.text },
               }}
             />
             <Button
               variant="contained"
               onClick={() => handleSaveKeywords(kwModal.tab)}
-              disabled={kwSaving || !kwInput.trim() || (kwModal.tab === "auto" && (keywords.auto || []).length >= 8)}
-              startIcon={kwModal.tab === "auto" && (keywords.auto || []).length >= 8 ? <BlockIcon /> : null}
+              disabled={kwSaving || !kwInput.trim()}
               sx={{
                 bgcolor: "#3b82f6", textTransform: "none", whiteSpace: "nowrap",
                 "&:hover": { bgcolor: "#2563eb" },
@@ -1656,75 +1606,42 @@ const Scraping = () => {
 
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 0.5 }}>
                 <Typography variant="subtitle2" sx={{ color: C.text, fontWeight: 700, fontSize: "0.85rem" }}>
-                  Auto Facebook Groups ({autoFbGroups.length}/8)
+                  Auto Facebook Groups ({autoFbGroups.length})
                 </Typography>
               </Box>
 
               <Typography variant="caption" sx={{ color: C.textMuted, display: "block", mb: 1.5 }}>
-                Facebook groups used exclusively for background Auto-Scrape Webhooks (Max 8 groups).
+                Facebook groups used exclusively for background Auto-Scrape Webhooks.
               </Typography>
-
-              {autoFbGroups.length >= 8 && (
-                <Alert severity="warning" icon={<BlockIcon fontSize="small" />} sx={{ mb: 1.5, py: 0.25, fontSize: "0.78rem" }}>
-                  Maximum 8 auto Facebook groups reached. Delete an existing group to add another.
-                </Alert>
-              )}
 
               <Stack spacing={1} sx={{ mb: 2 }}>
                 <TextField
                   size="small" fullWidth
                   label="Group Name"
-                  placeholder={autoFbGroups.length >= 8 ? "Limit reached (8/8)" : "e.g. IT Professionals"}
-                  value={autoFbGroups.length >= 8 ? "" : autoFbNewName}
-                  disabled={autoFbGroups.length >= 8}
-                  onChange={(e) => {
-                    if (autoFbGroups.length >= 8) return;
-                    setAutoFbNewName(e.target.value);
-                  }}
+                  placeholder="e.g. IT Professionals"
+                  value={autoFbNewName}
+                  disabled={autoFbSaving}
+                  onChange={(e) => setAutoFbNewName(e.target.value)}
                   sx={{
                     "& .MuiOutlinedInput-root": {
                       color: C.text, bgcolor: C.inputBg,
                       "& fieldset": { borderColor: C.border },
                       "&:hover fieldset": { borderColor: "#3b82f6" },
                       "&.Mui-focused fieldset": { borderColor: "#3b82f6" },
-                      "&.Mui-disabled": {
-                        bgcolor: autoFbGroups.length >= 8 ? (C.cardInner || "#1e293b") : C.inputBg,
-                        cursor: "not-allowed",
-                        "& fieldset": { borderColor: autoFbGroups.length >= 8 ? "#ef444480" : C.border },
-                      },
                     },
-                    "& .MuiInputBase-input": {
-                      color: C.text,
-                      "&.Mui-disabled": {
-                        cursor: "not-allowed",
-                        WebkitTextFillColor: autoFbGroups.length >= 8 ? (C.textMuted || "#9ca3af") : "inherit",
-                      },
-                    },
+                    "& .MuiInputBase-input": { color: C.text },
                   }}
                   InputLabelProps={{ style: { color: C.textSub } }}
                 />
                 <TextField
                   size="small" fullWidth
                   label="Group URL *"
-                  placeholder={autoFbGroups.length >= 8 ? "Limit reached (8/8)" : "https://www.facebook.com/groups/..."}
-                  value={autoFbGroups.length >= 8 ? "" : autoFbNewUrl}
-                  disabled={autoFbGroups.length >= 8}
-                  onChange={(e) => {
-                    if (autoFbGroups.length >= 8) return;
-                    setAutoFbNewUrl(e.target.value);
-                  }}
+                  placeholder="https://www.facebook.com/groups/..."
+                  value={autoFbNewUrl}
+                  disabled={autoFbSaving}
+                  onChange={(e) => setAutoFbNewUrl(e.target.value)}
                   onKeyDown={(e) => {
-                    if (autoFbGroups.length >= 8) return;
                     if (e.key === "Enter") handleAddAutoFbGroup();
-                  }}
-                  InputProps={{
-                    startAdornment: autoFbGroups.length >= 8 ? (
-                      <InputAdornment position="start">
-                        <Tooltip title="Maximum 8 groups reached. Delete an existing group to add new ones.">
-                          <BlockIcon sx={{ color: "#ef4444", fontSize: 20 }} />
-                        </Tooltip>
-                      </InputAdornment>
-                    ) : null,
                   }}
                   sx={{
                     "& .MuiOutlinedInput-root": {
@@ -1732,27 +1649,15 @@ const Scraping = () => {
                       "& fieldset": { borderColor: C.border },
                       "&:hover fieldset": { borderColor: "#3b82f6" },
                       "&.Mui-focused fieldset": { borderColor: "#3b82f6" },
-                      "&.Mui-disabled": {
-                        bgcolor: autoFbGroups.length >= 8 ? (C.cardInner || "#1e293b") : C.inputBg,
-                        cursor: "not-allowed",
-                        "& fieldset": { borderColor: autoFbGroups.length >= 8 ? "#ef444480" : C.border },
-                      },
                     },
-                    "& .MuiInputBase-input": {
-                      color: C.text,
-                      "&.Mui-disabled": {
-                        cursor: "not-allowed",
-                        WebkitTextFillColor: autoFbGroups.length >= 8 ? (C.textMuted || "#9ca3af") : "inherit",
-                      },
-                    },
+                    "& .MuiInputBase-input": { color: C.text },
                   }}
                   InputLabelProps={{ style: { color: C.textSub } }}
                 />
                 <Button
                   variant="contained" size="small"
-                  disabled={autoFbSaving || !autoFbNewName.trim() || !autoFbNewUrl.trim() || autoFbGroups.length >= 8}
+                  disabled={autoFbSaving || !autoFbNewName.trim() || !autoFbNewUrl.trim()}
                   onClick={handleAddAutoFbGroup}
-                  startIcon={autoFbGroups.length >= 8 ? <BlockIcon /> : null}
                   sx={{
                     bgcolor: "#3b82f6", textTransform: "none", alignSelf: "flex-start",
                     "&:hover": { bgcolor: "#2563eb" },

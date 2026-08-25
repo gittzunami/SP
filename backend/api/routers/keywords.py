@@ -53,20 +53,11 @@ def add_keywords(body: _KeywordAddBody, db: Session = Depends(get_db)):
     if pool not in ("shared", "google_news", "auto"):
         pool = "shared"
 
-    if pool == "auto":
-        current_count = db.query(ScraperKeyword).filter(ScraperKeyword.pool == "auto").count()
-        if current_count >= 8:
-            raise HTTPException(400, "Maximum 8 auto keywords allowed. Delete an existing keyword first.")
-
     added = []
     for kw in body.keywords:
         kw = kw.strip()
         if not kw:
             continue
-        if pool == "auto":
-            current_count = db.query(ScraperKeyword).filter(ScraperKeyword.pool == "auto").count()
-            if current_count >= 8:
-                break
 
         exists = db.query(ScraperKeyword).filter(
             ScraperKeyword.keyword == kw,
@@ -150,10 +141,6 @@ def add_facebook_group(body: _FacebookGroupBody, db: Session = Depends(get_db)):
     is_auto = bool(body.is_auto)
     if not name or not url:
         raise HTTPException(400, "name and url are required")
-    if is_auto:
-        auto_count = db.query(FacebookGroup).filter(FacebookGroup.is_auto == True).count()
-        if auto_count >= 8:
-            raise HTTPException(400, "Maximum 8 auto Facebook groups allowed. Delete an existing group first.")
 
     existing = db.query(FacebookGroup).filter(FacebookGroup.url == url, FacebookGroup.is_auto == is_auto).first()
     if existing:

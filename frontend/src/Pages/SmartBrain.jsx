@@ -262,11 +262,70 @@ function SbKpiCard({ title, accent, C, isDark, children }) {
   );
 }
 
+// Count the actual bullet/numbered items in a section's lines array
+function countSectionBullets(lines) {
+  let count = 0;
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith("- ") || t.startsWith("* ") || /^\d+\.\s/.test(t)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+// Extract ground-truth KPI counts by counting actual bullets in each section
+function extractGroundTruthCounts(sections) {
+  const counts = {
+    strengths: null,
+    weaknesses: null,
+    opportunities: null,
+    threats: null,
+    keyTopics: null,
+    keyFindings: null,
+  };
+
+  for (const sec of sections) {
+    const title = (sec.title || "").trim();
+    const swotCfg = matchSwotSection(title);
+
+    if (swotCfg) {
+      counts[swotCfg.key] = countSectionBullets(sec.lines);
+    } else if (/^key\s*topics?$/i.test(title)) {
+      counts.keyTopics = countSectionBullets(sec.lines);
+    } else if (/key\s*findings?|core\s*findings?|main\s*findings?|executive\s*findings?/i.test(title)) {
+      counts.keyFindings = countSectionBullets(sec.lines);
+    }
+
+    // Also check subsections (## SWOT Analysis → ### Strengths pattern)
+    if (sec.sub) {
+      for (const sub of sec.sub) {
+        const subTitle = (sub.title || "").trim();
+        const subSwotCfg = matchSwotSection(subTitle);
+        if (subSwotCfg) {
+          counts[subSwotCfg.key] = countSectionBullets(sub.lines);
+        } else if (/key\s*findings?|core\s*findings?|main\s*findings?|executive\s*findings?/i.test(subTitle)) {
+          counts.keyFindings = countSectionBullets(sub.lines);
+        }
+      }
+    }
+  }
+
+  return counts;
+}
+
 // Smart Brain: up to 6 KPI cards
-function SbStatCardsRow({ text, recordCount, C, isDark }) {
+function SbStatCardsRow({ text, recordCount, C, isDark, groundTruth }) {
   const s = parseSbSummaryStats(text, recordCount);
+  // Override LLM numbers with ground-truth counts when available
+  if (groundTruth) {
+    if (groundTruth.keyFindings !== null) s.keyFindings = groundTruth.keyFindings;
+    if (groundTruth.keyTopics !== null) s.keyTopics = groundTruth.keyTopics;
+    if (groundTruth.opportunities !== null) s.opportunities = groundTruth.opportunities;
+    if (groundTruth.threats !== null) s.risks = groundTruth.threats;
+  }
   return (
-    <Box sx={{ display: "flex", gap: 1.25, overflowX: "auto", pb: 0.5, mb: 2.25,
+    <Box sx={{ display: "flex", gap: 1.75, overflowX: "auto", pb: 0.75, mb: 3.5,
       "&::-webkit-scrollbar": { height: 4 },
       "&::-webkit-scrollbar-thumb": { bgcolor: isDark ? "#374151" : "#d1d5db", borderRadius: 4 },
     }}>
@@ -295,15 +354,15 @@ function SbStatCardsRow({ text, recordCount, C, isDark }) {
       )}
 
       {s.opportunities !== null && (
-        <SbKpiCard title="Opportunities" accent="#10b981" C={C} isDark={isDark}>
-          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#10b981", lineHeight: 1, mb: 0.25 }}>{s.opportunities}</Typography>
+        <SbKpiCard title="Opportunities" accent="#3b82f6" C={C} isDark={isDark}>
+          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#3b82f6", lineHeight: 1, mb: 0.25 }}>{s.opportunities}</Typography>
           <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Identified</Typography>
         </SbKpiCard>
       )}
 
       {s.risks !== null && (
-        <SbKpiCard title="Risks" accent="#ef4444" C={C} isDark={isDark}>
-          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#ef4444", lineHeight: 1, mb: 0.25 }}>{s.risks}</Typography>
+        <SbKpiCard title="Risks" accent="#f59e0b" C={C} isDark={isDark}>
+          <Typography sx={{ fontSize: "1.85rem", fontWeight: 900, color: "#f59e0b", lineHeight: 1, mb: 0.25 }}>{s.risks}</Typography>
           <Typography sx={{ fontSize: "0.62rem", color: C.textMuted, lineHeight: 1.3 }}>Flagged</Typography>
         </SbKpiCard>
       )}
@@ -590,11 +649,11 @@ function SbSectionContent({ lines, C, isDark, accent }) {
         else if (!t) { i++; break; } else break;
       }
       blocks.push(
-        <Box key={key++} sx={{ mt: 0.5, mb: 0.75 }}>
+        <Box key={key++} sx={{ mt: 1, mb: 1.25 }}>
           {items.map((item, j) => (
-            <Box key={j} sx={{ display: "flex", alignItems: "flex-start", gap: 1.25, mb: 0.55 }}>
-              <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: accent, mt: "7px", flexShrink: 0, boxShadow: `0 0 0 2px ${accent}22, 0 0 5px ${accent}40` }} />
-              <Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.75, fontSize: "0.85rem" }}>
+            <Box key={j} sx={{ display: "flex", alignItems: "flex-start", gap: 1.75, mb: 1.25 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: accent, mt: "9px", flexShrink: 0, boxShadow: `0 0 0 2px ${accent}22, 0 0 5px ${accent}40` }} />
+              <Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.95, fontSize: "0.875rem" }}>
                 {parseInline(item)}
               </Typography>
             </Box>
@@ -612,17 +671,17 @@ function SbSectionContent({ lines, C, isDark, accent }) {
         else if (!t) { i++; break; } else break;
       }
       blocks.push(
-        <Box key={key++} sx={{ mt: 0.5, mb: 0.75 }}>
+        <Box key={key++} sx={{ mt: 1, mb: 1.25 }}>
           {items.map((item, j) => (
-            <Box key={j} sx={{ display: "flex", alignItems: "flex-start", gap: 1.25, mb: 0.7 }}>
+            <Box key={j} sx={{ display: "flex", alignItems: "flex-start", gap: 1.75, mb: 1.35 }}>
               <Box sx={{
                 minWidth: 22, height: 22, borderRadius: "50%",
                 bgcolor: `${accent}1e`, border: `1.5px solid ${accent}`,
-                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, mt: "1px",
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, mt: "2px",
               }}>
                 <Typography sx={{ fontSize: "0.57rem", fontWeight: 800, color: accent, lineHeight: 1 }}>{j + 1}</Typography>
               </Box>
-              <Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.75, fontSize: "0.85rem" }}>
+              <Typography variant="body2" sx={{ color: C.textSub, lineHeight: 1.95, fontSize: "0.875rem" }}>
                 {parseInline(item)}
               </Typography>
             </Box>
@@ -634,7 +693,7 @@ function SbSectionContent({ lines, C, isDark, accent }) {
 
     if (trim === "---" || trim === "***" || trim === "___") {
       blocks.push(
-        <Box key={key++} sx={{ my: 1.5, height: "1px", background: `linear-gradient(90deg, ${accent}44 0%, ${accent}18 60%, transparent 100%)` }} />
+        <Box key={key++} sx={{ my: 2, height: "1px", background: `linear-gradient(90deg, ${accent}44 0%, ${accent}18 60%, transparent 100%)` }} />
       );
       i++; continue;
     }
@@ -652,7 +711,7 @@ function SbSectionContent({ lines, C, isDark, accent }) {
       }
       if (metrics.length) {
         blocks.push(
-          <Box key={key++} sx={{ display: "flex", flexWrap: "wrap", gap: 1.25, mt: 0.75, mb: 1.25 }}>
+          <Box key={key++} sx={{ display: "flex", flexWrap: "wrap", gap: 1.5, mt: 1, mb: 1.5 }}>
             {metrics.map((m, j) => (
               <SbMetricChip key={j} label={m.label} value={m.value} isDark={isDark} />
             ))}
@@ -674,7 +733,7 @@ function SbSectionContent({ lines, C, isDark, accent }) {
     }
     if (paraLines.length)
       blocks.push(
-        <Typography key={key++} variant="body2" sx={{ color: C.textSub, lineHeight: 1.8, mb: 0.5, fontSize: "0.875rem" }}>
+        <Typography key={key++} variant="body2" sx={{ color: C.textSub, lineHeight: 1.9, mb: 1.25, fontSize: "0.875rem" }}>
           {parseInline(paraLines.join(" "))}
         </Typography>
       );
@@ -686,12 +745,13 @@ function SbSectionContent({ lines, C, isDark, accent }) {
 // Individual grid card — collapsible, hover lift + glow
 function SbSectionCard({ sec, idx, C, isDark }) {
   const [expanded, setExpanded] = useState(true);
-  const accent    = SB_PALETTE[idx % SB_PALETTE.length];
-  const isTopics  = /key\s*topics?|main\s*topics?|topics?\s+identified|themes?|categories?/i.test(sec.title || "");
-  const isSources = /top\s*sources?|source\s*distribution|sources?\s*breakdown|data\s*sources?/i.test(sec.title || "");
-  const mdSpan    = isTopics || isSources ? 12 : getSbSpan(idx);
-  const smFull    = mdSpan > 6;
-  const isHero    = idx === 0;
+  const isFindings = /key\s*findings?|core\s*findings?|main\s*findings?|executive\s*findings?/i.test(sec.title || "");
+  const isTopics   = /key\s*topics?|main\s*topics?|topics?\s+identified|themes?|categories?/i.test(sec.title || "");
+  const isSources  = /top\s*sources?|source\s*distribution|sources?\s*breakdown|data\s*sources?/i.test(sec.title || "");
+  const accent     = isFindings ? "#7c3aed" : isTopics ? "#06b6d4" : SB_PALETTE[idx % SB_PALETTE.length];
+  const mdSpan     = isTopics || isSources || isFindings ? 12 : getSbSpan(idx);
+  const smFull     = mdSpan > 6;
+  const isHero     = idx === 0;
 
   const topicNames = isTopics
     ? sec.lines.map(l => { const m = l.trim().match(/^[-*]\s+(.+)$/) || l.trim().match(/^\d+\.\s+(.+)$/); return m ? m[1].replace(/\*\*/g, "").trim() : null; }).filter(Boolean)
@@ -817,10 +877,10 @@ function SbInsightsBar({ sections, isDark }) {
 
 // ── SWOT 2×2 grid ────────────────────────────────────────────────────────────
 const SWOT_CONFIG = [
-  { key: "strengths",    color: "#10b981", icon: "S", pattern: /^strengths?$/i },
-  { key: "weaknesses",   color: "#ef4444", icon: "W", pattern: /^weaknesses?$/i },
-  { key: "opportunities", color: "#3b82f6", icon: "O", pattern: /^opportunities?$/i },
-  { key: "threats",      color: "#f59e0b", icon: "T", pattern: /^threats?$/i },
+  { key: "strengths",    color: "#10b981", icon: "S", pattern: /(?:^|\b|\bS\s*[-—:]\s*)strengths?(?:\b|$)/i },
+  { key: "weaknesses",   color: "#ef4444", icon: "W", pattern: /(?:^|\b|\bW\s*[-—:]\s*)weaknesses?(?:\b|$)/i },
+  { key: "opportunities", color: "#3b82f6", icon: "O", pattern: /(?:^|\b|\bO\s*[-—:]\s*)opportunities?(?:\b|$)/i },
+  { key: "threats",      color: "#f59e0b", icon: "T", pattern: /(?:^|\b|\bT\s*[-—:]\s*)threats?(?:\b|$)/i },
 ];
 
 function matchSwotSection(title) {
@@ -878,7 +938,7 @@ function SbSwotGrid({ sections, C, isDark }) {
     <Box sx={{
       display: "grid",
       gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)" },
-      gap: 1.75,
+      gap: 3.0,
     }}>
       {matched.map(({ sec, cfg }) => {
         const accent = cfg.color;
@@ -895,7 +955,7 @@ function SbSwotGrid({ sections, C, isDark }) {
             },
           }}>
             <Box sx={{
-              px: 2, py: 1.25,
+              px: 2.75, py: 1.6,
               background: isDark
                 ? `linear-gradient(125deg, ${accent}28 0%, ${accent}10 100%)`
                 : `linear-gradient(125deg, ${accent}18 0%, ${accent}08 100%)`,
@@ -917,7 +977,7 @@ function SbSwotGrid({ sections, C, isDark }) {
                 <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: accent, opacity: 0.85, boxShadow: `0 0 5px ${accent}` }} />
               </Box>
             </Box>
-            <Box sx={{ px: 2, py: 1.5 }}>
+            <Box sx={{ px: 2.75, py: 2.5 }}>
               <SbSectionContent lines={sec.lines} C={C} isDark={isDark} accent={accent} />
             </Box>
           </Box>
@@ -951,10 +1011,19 @@ function SbMarkdownRenderer({ text, C, isDark }) {
   const beforeSwot = remaining.filter(({ sec }) => isKeyTopics(sec));
   const afterSwot  = remaining.filter(({ sec }) => !isKeyTopics(sec));
 
+  const getSectionSortWeight = (title) => {
+    const t = (title || "").toLowerCase();
+    if (/key\s*findings?|core\s*findings?|main\s*findings?|executive\s*findings?/i.test(t)) return 10;
+    if (/recommendations?|strategic\s*recommendations?|actionable\s*recommendations?|next\s*steps/i.test(t)) return 20;
+    if (/top\s*sources?|sources?\s*distribution|sources?\s*breakdown|data\s*sources?/i.test(t)) return 30;
+    return 15;
+  };
+  const afterSwotSorted = [...afterSwot].sort((a, b) => getSectionSortWeight(a.sec.title) - getSectionSortWeight(b.sec.title));
+
   return (
     <Box>
       {pageTitle && (
-        <Typography sx={{ fontWeight: 800, fontSize: { xs: "1.1rem", md: "1.3rem" }, color: C.text, mb: 1.5, lineHeight: 1.3 }}>
+        <Typography sx={{ fontWeight: 800, fontSize: { xs: "1.1rem", md: "1.3rem" }, color: C.text, mb: 2.5, lineHeight: 1.3 }}>
           {parseInline(pageTitle)}
         </Typography>
       )}
@@ -964,7 +1033,7 @@ function SbMarkdownRenderer({ text, C, isDark }) {
           <Box sx={{
             display: "grid",
             gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(12, 1fr)" },
-            gap: 1.75,
+            gap: 3.0,
           }}>
             {display.map(({ sec, i }) => (
               <SbSectionCard key={i} sec={sec} idx={i} C={C} isDark={isDark} />
@@ -973,16 +1042,16 @@ function SbMarkdownRenderer({ text, C, isDark }) {
         </>
       )}
       {swotMode && beforeSwot.length > 0 && (
-        <Box sx={{ mb: 1.75 }}>
+        <Box sx={{ mb: 3.5 }}>
           {beforeSwot.map(({ sec, i }) => (
             <SbSectionCard key={i} sec={sec} idx={i} C={C} isDark={isDark} />
           ))}
         </Box>
       )}
       {swotMode && <SbSwotGrid sections={sections} C={C} isDark={isDark} />}
-      {swotMode && afterSwot.length > 0 && (
-        <Box sx={{ mt: 1.75 }}>
-          {afterSwot.map(({ sec, i }) => (
+      {swotMode && afterSwotSorted.length > 0 && (
+        <Box sx={{ mt: 3.5, display: "flex", flexDirection: "column", gap: 3.0 }}>
+          {afterSwotSorted.map(({ sec, i }) => (
             <SbSectionCard key={i} sec={sec} idx={i} C={C} isDark={isDark} />
           ))}
         </Box>
@@ -1690,10 +1759,17 @@ export default function SmartBrain() {
                   </Tooltip>
                 </Box>
 
-                {/* KPI stat cards row */}
-                <SbStatCardsRow text={result.result} recordCount={result.record_count} C={C} isDark={isDark} />
-
-                <SbMarkdownRenderer text={result.result} C={C} isDark={isDark} />
+                {/* KPI stat cards row + rendered analysis — share parsed sections */}
+                {(() => {
+                  const { sections } = parseSbSections(result.result);
+                  const gt = extractGroundTruthCounts(sections);
+                  return (
+                    <>
+                      <SbStatCardsRow text={result.result} recordCount={result.record_count} C={C} isDark={isDark} groundTruth={gt} />
+                      <SbMarkdownRenderer text={result.result} C={C} isDark={isDark} />
+                    </>
+                  );
+                })()}
 
                 {/* Footer */}
                 <Box sx={{ mt: 2.5, display: "flex", justifyContent: "space-between",
