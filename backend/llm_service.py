@@ -400,7 +400,9 @@ def _is_token_limit_error(exc: Exception) -> bool:
             "request exceeds token limit",
             "context window exceeded",
             "resourceexhausted",
-            "400",
+            "exceeds the maximum number of tokens",
+            "exceeds the maximum allowed number of tokens",
+            "token limit",
         )
     )
 
@@ -474,6 +476,16 @@ def _map_reduce_feed_to_llm(db, provider: str, model: str, api_key: str,
       3. Passes all chunk summaries to the Master Reducer to produce the final unified analysis.
     """
     import concurrent.futures
+
+    # Shrink chunk_size (never grow it) so each chunk's estimated tokens stay under
+    # the provider's input limit, regardless of how large individual records are.
+    safe_chunk_size = _safe_chunk_size(data_rows, chunk_size)
+    if safe_chunk_size < chunk_size:
+        logger.info(
+            "Map-Reduce Smart Brain: shrinking chunk_size %d -> %d based on estimated record size",
+            chunk_size, safe_chunk_size,
+        )
+    chunk_size = safe_chunk_size
 
     # Slice into chunks
     chunks = [data_rows[i:i + chunk_size] for i in range(0, len(data_rows), chunk_size)]
@@ -569,6 +581,40 @@ def _truncate_data(data_rows: list[dict]) -> tuple[str, int]:
     return text, len(data_rows)
 
 
+# ── Token-aware chunk sizing ───────────────────────────────────────────────────
+# OpenAI/Anthropic/Gemini all report limits in tokens, not record counts, and record
+# size varies a lot across scrapers (a Reddit body vs. a bare Twitter stat block).
+# A fixed record-count-per-chunk (e.g. 500) can land well above the provider's input
+# token ceiling depending on content, which is what produced errors like:
+#   "Input tokens exceed the configured limit of 272000 tokens ... resulted in 444733 tokens"
+# We estimate tokens up front (~4 chars/token, OpenAI's own rule of thumb) and size
+# chunks to stay under a safe budget, leaving headroom for the system prompt,
+# instructions, and completion tokens. The recursive halving fallback in
+# _summarize_single_chunk remains as a last-resort safety net for any edge case
+# this estimate misses.
+_CHARS_PER_TOKEN = 4
+MAX_INPUT_TOKENS_PER_CALL = 200_000
+
+
+def _estimate_tokens(rows: list[dict]) -> int:
+    return max(1, len(json.dumps(rows, ensure_ascii=False)) // _CHARS_PER_TOKEN)
+
+
+def _safe_chunk_size(data_rows: list[dict], requested_chunk_size: int) -> int:
+    """
+    Returns a record-count-per-chunk that keeps each chunk's estimated tokens under
+    MAX_INPUT_TOKENS_PER_CALL, capped at requested_chunk_size (never larger).
+    """
+    if not data_rows:
+        return requested_chunk_size
+    sample_n = min(len(data_rows), 50)
+    avg_tokens_per_record = _estimate_tokens(data_rows[:sample_n]) / sample_n
+    if avg_tokens_per_record <= 0:
+        return requested_chunk_size
+    token_safe_size = max(1, int(MAX_INPUT_TOKENS_PER_CALL // avg_tokens_per_record))
+    return max(1, min(requested_chunk_size, token_safe_size))
+
+
 def feed_to_llm(db, enhanced_prompt: str, data_rows: list[dict],
                 keyword: str = "") -> dict:
     """
@@ -591,8 +637,10 @@ def feed_to_llm(db, enhanced_prompt: str, data_rows: list[dict],
     if not data_rows:
         raise RuntimeError("No records provided for analysis.")
 
-    # If records > 700, immediately use Map-Reduce chunking (500 records/chunk)
-    if len(data_rows) > 700:
+    # If records > 700, or the estimated payload already exceeds the safe per-call
+    # token budget (e.g. records with unusually large text fields), immediately use
+    # Map-Reduce chunking instead of attempting — and failing — a single-pass call.
+    if len(data_rows) > 700 or _estimate_tokens(data_rows) > MAX_INPUT_TOKENS_PER_CALL:
         return _map_reduce_feed_to_llm(
             db, provider, model, api_key, enhanced_prompt, data_rows, keyword, chunk_size=500
         )

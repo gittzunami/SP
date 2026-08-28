@@ -119,6 +119,22 @@ def _create_run(db: Session, scraper: str, payload: dict, task_id: str, batch_id
     return run.id
 
 
+def _finalize_run_total(db: Session, run_id: int, saved: int) -> None:
+    """
+    Sync ScrapeRun.total_items to the number of rows actually persisted for this run.
+
+    _create_run() initially sets total_items from the raw scraped payload count, but
+    on_conflict_do_nothing() means duplicate items are skipped rather than inserted
+    under this run_id. Without this correction, total_items overstates how many rows
+    are actually queryable for this run (which is what Smart Brain / batch totals use),
+    causing batch listings to report more records than were ever analyzed.
+    """
+    from db_models import ScrapeRun
+    run = db.query(ScrapeRun).filter_by(id=run_id).first()
+    if run is not None:
+        run.total_items = saved
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Reddit
 # ══════════════════════════════════════════════════════════════════════════════
@@ -166,6 +182,7 @@ def save_reddit(db: Session, payload: dict, task_id: str = "",
         if is_new:
             saved += 1
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("Reddit: %d posts saved to DB (run_id=%d)", saved, run_id)
     return saved
@@ -259,6 +276,7 @@ def save_tiktok(db: Session, payload: dict, task_id: str = "",
         if is_new:
             saved += 1
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("TikTok: %d posts saved to DB (run_id=%d)", saved, run_id)
     return saved
@@ -327,6 +345,7 @@ def save_edugeek(db: Session, payload: dict, task_id: str = "",
             if is_new:
                 saved += 1
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("EduGeek: %d posts saved to DB (run_id=%d)", saved, run_id)
     return saved
@@ -402,6 +421,7 @@ def save_autodesk(db: Session, payload: dict, task_id: str = "",
         if is_new:
             saved += 1
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("Autodesk: %d posts saved to DB (run_id=%d)", saved, run_id)
     return saved
@@ -504,6 +524,7 @@ def save_stackexchange(db: Session, payload: dict, task_id: str = "",
         if is_new:
             saved += 1
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("StackExchange: %d questions saved to DB (run_id=%d)", saved, run_id)
     return saved
@@ -562,6 +583,7 @@ def save_google_news(db: Session, payload: dict, task_id: str = "",
         except Exception as exc:
             logger.warning("Failed to insert article '%s': %s", a.get("title", "N/A")[:30], exc)
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("Google News: %d articles saved to DB (run_id=%d), skipped: %d empty URL",
                 saved, run_id, skipped_empty_url)
@@ -625,6 +647,7 @@ def save_instagram(db: Session, payload: dict, task_id: str = "",
         if is_new:
             saved += 1
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("Instagram: %d posts saved to DB (run_id=%d)", saved, run_id)
     return saved
@@ -688,6 +711,7 @@ def save_twitter(db: Session, payload: dict, task_id: str = "",
         res    = db.execute(stmt)
         saved += res.rowcount
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("Twitter: %d tweets saved to DB (run_id=%d)", saved, run_id)
     return saved
@@ -734,6 +758,7 @@ def save_spiceworks(db: Session, payload: dict, task_id: str = "",
         if res.rowcount:
             saved += 1
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("Spiceworks: %d posts saved to DB (run_id=%d)", saved, run_id)
     return saved
@@ -807,6 +832,7 @@ def save_quora(db: Session, payload: dict, task_id: str = "",
                 ))
             saved += 1
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("Quora: %d questions saved to DB (run_id=%d)", saved, run_id)
     return saved
@@ -872,6 +898,7 @@ def save_facebook(db: Session, payload: dict, task_id: str = "",
                 ))
             saved += 1
 
+    _finalize_run_total(db, run_id, saved)
     db.commit()
     logger.info("Facebook: %d posts saved to DB (run_id=%d)", saved, run_id)
     return saved
