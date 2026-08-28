@@ -54,8 +54,21 @@ def _estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> fl
 def _record_llm_spend(db, provider: str, model: str, operation: str,
                        prompt_tokens: int, completion_tokens: int,
                        keyword: str = "", is_estimated: bool = False) -> None:
-    if db is None:
+    import database
+    session = None
+    own_session = False
+    if getattr(database, "SessionLocal", None):
+        try:
+            session = database.SessionLocal()
+            own_session = True
+        except Exception:
+            session = db
+    else:
+        session = db
+
+    if session is None:
         return
+
     try:
         from db_models import LLMSpending
         cost = _estimate_cost(model, prompt_tokens, completion_tokens)
@@ -71,16 +84,22 @@ def _record_llm_spend(db, provider: str, model: str, operation: str,
             keyword           = (keyword or "")[:255],
             called_at         = datetime.now(tz=timezone.utc),
         )
-        db.add(row)
-        db.commit()
+        session.add(row)
+        session.commit()
         logger.info("LLM spend recorded: %.6f USD  provider=%s  model=%s  op=%s",
                     cost, provider, model, operation)
     except Exception as exc:
         logger.error("Failed to record LLM spend: %s", exc)
         try:
-            db.rollback()
+            session.rollback()
         except Exception:
             pass
+    finally:
+        if own_session and session:
+            try:
+                session.close()
+            except Exception:
+                pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════

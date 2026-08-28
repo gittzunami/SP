@@ -23,7 +23,6 @@ class Settings:
     # Paths that bypass JWT check
     AUTH_SKIP_EXACT: frozenset = frozenset({
         "/api/auth/login", "/docs", "/openapi.json", "/redoc", "/", "/api/health",
-        "/api/smart-brain/batches",
     })
     AUTH_SKIP_PREFIX: tuple = ("/webhook/", "/api/webhook/")
 

@@ -25,12 +25,12 @@ webhook_router = APIRouter(prefix="/api/webhook/smart-brain", tags=["SmartBrainW
 class SmartBrainRunRequest(BaseModel):
     prompt:      str
     run_ids:     List[int]
-    max_per_run: int  = 100
-    keyword:     str  = ""
+    max_per_run: int | None = None
+    keyword:     str        = ""
 
 
 class SmartBrainBatchRunRequest(BaseModel):
-    batch_id:   str
+    batch_id:   str | None = None
     prompt:     str | None = None
     chunk_size: int | None = 500
 
@@ -64,7 +64,7 @@ _LLM_STRIP_FIELDS: dict[str, set] = {
 }
 
 
-def _smart_brain_records_for_runs(db, runs, max_per_run: int = 100) -> list[dict]:
+def _smart_brain_records_for_runs(db, runs, max_per_run: int | None = None) -> list[dict]:
     from services.search_service import (
         _reddit_post_preview, _tiktok_post_preview, _edugeek_post_preview,
         _autodesk_post_preview, _se_question_preview, _gnews_preview,
@@ -102,7 +102,9 @@ def _smart_brain_records_for_runs(db, runs, max_per_run: int = 100) -> list[dict
                     GoogleNewsArticle.scraped_at >= window_start,
                     GoogleNewsArticle.scraped_at <= window_end,
                 )
-            recs = q.limit(max_per_run).all()
+            if max_per_run is not None:
+                q = q.limit(max_per_run)
+            recs = q.all()
             rows.extend(_gnews_preview(r, db) for r in recs)
             continue
         entry = SOURCE_MAP.get(scraper)
@@ -110,7 +112,10 @@ def _smart_brain_records_for_runs(db, runs, max_per_run: int = 100) -> list[dict
             continue
         model, preview_fn = entry
         try:
-            recs  = db.query(model).filter(model.run_id == run.id).limit(max_per_run).all()
+            q = db.query(model).filter(model.run_id == run.id)
+            if max_per_run is not None:
+                q = q.limit(max_per_run)
+            recs  = q.all()
             strip = _LLM_STRIP_FIELDS.get(scraper, set())
             for r in recs:
                 row = preview_fn(r, db)
@@ -224,7 +229,8 @@ def smart_brain_run(body: SmartBrainRunRequest, db: Session = Depends(get_db)):
     if not runs:
         raise HTTPException(404, "None of the selected run IDs were found.")
 
-    data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=max(1, body.max_per_run))
+    run_limit = max(1, body.max_per_run) if body.max_per_run is not None else None
+    data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=run_limit)
     if not data_rows:
         raise HTTPException(400, "No records found for the selected runs.")
 
@@ -558,17 +564,25 @@ def _list_batches_impl(db: Session) -> dict:
     return {"total_batches": len(result), "batches": result}
 
 
-def _execute_batch_smart_brain(db: Session, batch_id: str, custom_prompt: str | None = None, chunk_size: int = 500) -> dict:
+def _execute_batch_smart_brain(db: Session, batch_id: str | None = None, custom_prompt: str | None = None, chunk_size: int = 500) -> dict:
     from db_models import ScrapeRun, SavedPrompt, SmartBrainAnalysis
     from llm_service import feed_to_llm
+
+    # If batch_id is omitted or "latest", auto-detect the most recent scrape batch in DB
+    if not batch_id or str(batch_id).strip().lower() in ("", "latest", "none", "null"):
+        latest_run = db.query(ScrapeRun).filter(ScrapeRun.batch_id.isnot(None)).order_by(ScrapeRun.scraped_at.desc()).first()
+        if not latest_run:
+            raise HTTPException(status_code=404, detail="No scrape batches found in database.")
+        batch_id = latest_run.batch_id
+        logger.info("Auto-detected latest batch_id: %s", batch_id)
 
     # 1. Fetch all runs matching this batch
     runs = db.query(ScrapeRun).filter(ScrapeRun.batch_id == batch_id).all()
     if not runs:
         raise HTTPException(status_code=404, detail=f"No scrape runs found for batch_id: {batch_id}")
 
-    # 2. Extract records across all runs in this batch (high max_per_run to include all records)
-    data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=10000)
+    # 2. Extract records across all runs in this batch (unlimited to include all records)
+    data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=None)
     if not data_rows:
         raise HTTPException(status_code=400, detail=f"No scraped records found in database for batch_id: {batch_id}")
 
@@ -641,8 +655,13 @@ def list_batches_auth(db: Session = Depends(get_db)):
 
 
 @router.post("/run-batch")
-def run_batch_auth(payload: SmartBrainBatchRunRequest, db: Session = Depends(get_db)):
+def run_batch_auth(payload: SmartBrainBatchRunRequest = Body(default_factory=SmartBrainBatchRunRequest), db: Session = Depends(get_db)):
     return _execute_batch_smart_brain(db, payload.batch_id, payload.prompt, payload.chunk_size or 500)
+
+
+@router.post("/run-latest")
+def run_latest_auth(db: Session = Depends(get_db)):
+    return _execute_batch_smart_brain(db, batch_id=None)
 
 
 @router.post("/batches/{batch_id}/run")
@@ -658,8 +677,13 @@ def list_batches_webhook(db: Session = Depends(get_db)):
 
 
 @webhook_router.post("/run-batch")
-def run_batch_webhook(payload: SmartBrainBatchRunRequest, db: Session = Depends(get_db)):
+def run_batch_webhook(payload: SmartBrainBatchRunRequest = Body(default_factory=SmartBrainBatchRunRequest), db: Session = Depends(get_db)):
     return _execute_batch_smart_brain(db, payload.batch_id, payload.prompt, payload.chunk_size or 500)
+
+
+@webhook_router.post("/run-latest")
+def run_latest_webhook(db: Session = Depends(get_db)):
+    return _execute_batch_smart_brain(db, batch_id=None)
 
 
 @webhook_router.post("/batches/{batch_id}/run")

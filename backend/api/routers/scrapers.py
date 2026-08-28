@@ -445,7 +445,8 @@ def _run_all_auto_scrape_parallel(task_specs: list[tuple[str, str, Any]], batch_
             logger.warning("Auto-scheduler batch %s: no ScrapeRun rows found — skipping Smart Brain", batch_id[:8])
             return
 
-        data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=50)
+        # Fetch 100% of all scraped records across all runs in this batch
+        data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=None)
         if not data_rows:
             logger.warning("Auto-scheduler batch %s: no records found for Smart Brain", batch_id[:8])
             return
