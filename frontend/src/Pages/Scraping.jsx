@@ -228,37 +228,37 @@ const Scraping = () => {
     setCards((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
   }, []);
 
-  // ── Sync last_run + totalItems from DB on mount ────────────────────────────
+  // ── Sync status, errors, last_run + totalItems from DB on mount & interval ───
   useEffect(() => {
-    apiFetch(`${API_BASE}/api/scraper-latest-batch-status`)
-      .then((r) => r.json())
-      .then((batchStatus) => {
-        setCards((prev) => {
-          const next = { ...prev };
-          for (const [key, data] of Object.entries(batchStatus)) {
-            if (!next[key]) continue;
+    const syncBatchStatus = () => {
+      apiFetch(`${API_BASE}/api/scraper-latest-batch-status`)
+        .then((r) => r.json())
+        .then((batchStatus) => {
+          setCards((prev) => {
+            const next = { ...prev };
+            for (const [key, data] of Object.entries(batchStatus)) {
+              if (!next[key]) continue;
 
-            // Fix stuck running/queued state
-            if (next[key].status === "running" || next[key].status === "queued") {
+              const isPolling = (next[key].taskIds?.length > 0) && (next[key].status === "running" || next[key].status === "queued");
+              if (isPolling) continue; // let active in-browser polling handle its own live state
+
               next[key] = {
                 ...next[key],
-                status: data.last_run ? "completed" : "idle",
+                status: data.status || (data.last_run ? "completed" : "idle"),
+                lastRun: data.last_run ? new Date(data.last_run).toLocaleString() : next[key].lastRun,
+                totalItems: data.last_total_items ?? next[key].totalItems,
+                error: data.error || null,
               };
             }
+            return next;
+          });
+        })
+        .catch(() => {});
+    };
 
-            // Restore lastRun and totalItems from DB
-            if (data.last_run) {
-              next[key] = {
-                ...next[key],
-                lastRun: new Date(data.last_run).toLocaleString(),
-                totalItems: data.last_total_items,
-              };
-            }
-          }
-          return next;
-        });
-      })
-      .catch(() => {});
+    syncBatchStatus();
+    const intervalId = setInterval(syncBatchStatus, 10_000);
+    return () => clearInterval(intervalId);
   }, []);
 
   // ── Per-scraper budget blocks ─────────────────────────────────────────────

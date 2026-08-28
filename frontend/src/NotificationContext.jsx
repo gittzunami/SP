@@ -28,6 +28,38 @@ export function NotificationProvider({ children }) {
     } catch {}
   }, [notifications]);
 
+  // ── Sync background notifications from backend ──────────────────────────────
+  useEffect(() => {
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+    const syncNotifications = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/notifications/recent`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.notifications) && data.notifications.length > 0) {
+          setNotifications((prev) => {
+            const existingIds = new Set(prev.map((n) => n.id));
+            const newItems = data.notifications
+              .filter((n) => !existingIds.has(n.id))
+              .map((n) => ({ ...n, read: false }));
+            if (newItems.length === 0) return prev;
+            return [...newItems, ...prev].slice(0, 100);
+          });
+        }
+      } catch (_) {}
+    };
+
+    syncNotifications();
+    const intervalId = setInterval(syncNotifications, 10_000);
+    return () => clearInterval(intervalId);
+  }, []);
+
   const addNotification = useCallback(({ title, message, type = "info" }) => {
     setNotifications((prev) => [
       {

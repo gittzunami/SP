@@ -367,6 +367,183 @@ def _append_or_sync_top_sources(content: str, data_rows: list[dict]) -> str:
         return f"{text}\n\n{sources_section}"
 
 
+def _is_token_limit_error(exc: Exception) -> bool:
+    """Check if exception is caused by payload size / token limit / context length exceeded."""
+    err_str = str(exc).lower()
+    return any(
+        phrase in err_str for phrase in (
+            "context_length_exceeded",
+            "maximum context length",
+            "input tokens exceed",
+            "string_above_max_length",
+            "prompt is too long",
+            "prompt exceeds maximum context",
+            "request exceeds token limit",
+            "context window exceeded",
+            "resourceexhausted",
+            "400",
+        )
+    )
+
+
+def _summarize_single_chunk(db, provider: str, api_key: str, model: str,
+                            chunk: list[dict], prompt: str, keyword: str,
+                            chunk_index: int, total_chunks: int) -> dict:
+    """
+    Summarizes a single chunk of records with automatic recursive sub-chunk fallback if token limits are exceeded.
+    """
+    if not chunk:
+        return {"response": "", "tokens_used": 0, "cost_usd": 0.0}
+
+    system_msg = (
+        "You are an expert intelligence analyst. "
+        "You will be given a batch of scraped social media and forum data. "
+        "Extract, analyze, and synthesize the key intelligence signals from this batch "
+        f"according to the analysis request. (Part {chunk_index} of {total_chunks}).\n\n"
+        "Provide a high-density structured summary covering:\n"
+        "- Key Topics & Discussion themes observed\n"
+        "- Sentiment signals & main arguments (positive vs negative ratio)\n"
+        "- Critical Findings, specific problems, and data points\n"
+        "- Emerging Trends, Opportunities, or Risks\n"
+        "Be specific, retain platform names, important metrics, and core user quotes/feedback."
+    )
+    user_msg = (
+        f"=== BATCH DATA ({len(chunk)} records) ===\n\n"
+        f"{json.dumps(chunk, ensure_ascii=False, indent=1)}\n\n"
+        f"=== ANALYSIS GOAL ===\n\n"
+        f"{prompt}"
+    )
+
+    try:
+        if provider == "openai":
+            res = _call_openai(db, api_key, model, system_msg, user_msg, keyword)
+        elif provider == "anthropic":
+            res = _call_anthropic(db, api_key, model, system_msg, user_msg, keyword)
+        elif provider == "gemini":
+            res = _call_gemini(db, api_key, model, system_msg, user_msg, keyword)
+        else:
+            raise RuntimeError(f"Unknown provider: {provider}")
+        return res
+    except Exception as exc:
+        if _is_token_limit_error(exc) and len(chunk) > 1:
+            logger.warning(
+                "Chunk %d/%d with %d records exceeded token limit (%s). Recursively splitting into halves...",
+                chunk_index, total_chunks, len(chunk), exc,
+            )
+            mid = len(chunk) // 2
+            sub1 = _summarize_single_chunk(db, provider, api_key, model, chunk[:mid], prompt, keyword, chunk_index, total_chunks * 2)
+            sub2 = _summarize_single_chunk(db, provider, api_key, model, chunk[mid:], prompt, keyword, chunk_index + 1, total_chunks * 2)
+            combined_resp = f"### Sub-Batch A ({mid} records):\n{sub1.get('response', '')}\n\n### Sub-Batch B ({len(chunk)-mid} records):\n{sub2.get('response', '')}"
+            return {
+                "response":    combined_resp,
+                "provider":    provider,
+                "model":       model,
+                "tokens_used": sub1.get("tokens_used", 0) + sub2.get("tokens_used", 0),
+                "cost_usd":    round(sub1.get("cost_usd", 0.0) + sub2.get("cost_usd", 0.0), 8),
+            }
+        else:
+            raise exc
+
+
+def _map_reduce_feed_to_llm(db, provider: str, model: str, api_key: str,
+                            enhanced_prompt: str, data_rows: list[dict],
+                            keyword: str = "", chunk_size: int = 500) -> dict:
+    """
+    Map-Reduce LLM synthesis:
+      1. Splits data_rows into chunks of `chunk_size` (default 500).
+      2. Summarizes all chunks concurrently via ThreadPoolExecutor.
+      3. Passes all chunk summaries to the Master Reducer to produce the final unified analysis.
+    """
+    import concurrent.futures
+
+    # Slice into chunks
+    chunks = [data_rows[i:i + chunk_size] for i in range(0, len(data_rows), chunk_size)]
+    total_chunks = len(chunks)
+    logger.info(
+        "Map-Reduce Smart Brain: processing %d total records across %d chunks of ~%d records",
+        len(data_rows), total_chunks, chunk_size,
+    )
+
+    # ── Map Phase: process chunks concurrently ────────────────────────────────
+    chunk_results = [None] * total_chunks
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, max(1, total_chunks)), thread_name_prefix="smart_brain_map") as pool:
+        future_to_idx = {
+            pool.submit(
+                _summarize_single_chunk,
+                db, provider, api_key, model, chunk, enhanced_prompt, keyword, idx + 1, total_chunks
+            ): idx
+            for idx, chunk in enumerate(chunks)
+        }
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            chunk_results[idx] = future.result()
+
+    total_map_tokens = sum(cr.get("tokens_used", 0) for cr in chunk_results if cr)
+    total_map_cost   = sum(cr.get("cost_usd", 0.0) for cr in chunk_results if cr)
+
+    # Combine all chunk summaries for the Master Reducer
+    chunk_summaries_text = "\n\n".join(
+        f"--- INTERMEDIATE DATA SUMMARY PART {i + 1} OF {total_chunks} ({len(chunks[i])} records) ---\n{cr['response']}"
+        for i, cr in enumerate(chunk_results) if cr
+    )
+
+    # ── Reduce Phase: Master Holistic Synthesis ───────────────────────────────
+    master_system_msg = (
+        "You are an expert intelligence analyst. "
+        "You will be given structured intermediate intelligence summaries from multiple batches of scraped data, "
+        "followed by the master analysis request. "
+        "Your task is to synthesize all intermediate summaries into one cohesive, comprehensive master report.\n\n"
+        "MANDATORY DEFAULT RULES — always apply these regardless of the user prompt:\n"
+        "1. DEEP ANALYSIS: Extract maximum cross-platform insights, aggregate statistics, identify overarching patterns, and surface non-obvious conclusions.\n"
+        "2. COMPLETE SECTIONS: Every section you produce MUST contain at least 1 substantive bullet point — no section may be left empty.\n"
+        "3. STRICT PROMPT ADHERENCE: Follow the user prompt exactly.\n\n"
+        "FORMATTING RULES — follow these exactly:\n"
+        "- Structure your response using Markdown.\n"
+        "- Use ## (H2) headings for each major section (e.g. ## Key Trends, ## Sentiment, ## Recommendations).\n"
+        "- Use ### (H3) for sub-sections within a section.\n"
+        "- Use bullet lists (- item) for unordered findings and numbered lists (1. item) for ranked or sequential items.\n"
+        "- Use **bold** to highlight key terms, platform names, or important numbers.\n"
+        "- Always open your response with a ## Key Metrics section that contains ONLY **Label**: Value lines and no prose. "
+        "Required lines: **Positive Sentiment**: XX% and **Negative Sentiment**: XX% (estimate from overall data tone, must sum to 100%), "
+        "**Key Findings**: N, **Key Topics**: N (if risks/opportunities apply add **Risks**: N, **Opportunities**: N).\n"
+        "- Use the section heading '## Key Topics' when listing themes, topics, or categories, and list each one as a bullet item.\n"
+        "- Always include a dedicated '## Key Findings' section directly before '## Recommendations' that presents the core findings.\n"
+        "- Use the section heading '## Recommendations' for actionable strategic advice and next steps.\n"
+        "- Always conclude your response with a '## Top Sources' section at the very end."
+    )
+    master_user_msg = (
+        f"=== INTERMEDIATE BATCH SUMMARIES ({len(data_rows)} total records across {total_chunks} parts) ===\n\n"
+        f"{chunk_summaries_text}\n\n"
+        f"=== MASTER ANALYSIS REQUEST ===\n\n"
+        f"{enhanced_prompt}"
+    )
+
+    logger.info("Map-Reduce Smart Brain: running Master Reducer synthesis...")
+    if provider == "openai":
+        master_res = _call_openai(db, api_key, model, master_system_msg, master_user_msg, keyword)
+    elif provider == "anthropic":
+        master_res = _call_anthropic(db, api_key, model, master_system_msg, master_user_msg, keyword)
+    elif provider == "gemini":
+        master_res = _call_gemini(db, api_key, model, master_system_msg, master_user_msg, keyword)
+    else:
+        raise RuntimeError(f"Unknown provider: {provider}")
+
+    # Aggregate tokens and cost across Map + Reduce
+    total_tokens = total_map_tokens + master_res.get("tokens_used", 0)
+    total_cost   = round(total_map_cost + master_res.get("cost_usd", 0.0), 8)
+
+    # Sync and format Top Sources
+    master_res["response"]    = _append_or_sync_top_sources(master_res.get("response", ""), data_rows)
+    master_res["tokens_used"] = total_tokens
+    master_res["cost_usd"]    = total_cost
+
+    logger.info(
+        "Map-Reduce Smart Brain complete: %d records -> %d tokens total, $%.6f USD",
+        len(data_rows), total_tokens, total_cost,
+    )
+    return master_res
+
+
 def _truncate_data(data_rows: list[dict]) -> tuple[str, int]:
     """Serialize all records and send them to the LLM as-is, no size limit."""
     text = json.dumps(data_rows, ensure_ascii=False, indent=2)
@@ -377,7 +554,8 @@ def feed_to_llm(db, enhanced_prompt: str, data_rows: list[dict],
                 keyword: str = "") -> dict:
     """
     Sends the enhanced prompt + scraped data to the user's active LLM provider.
-    Returns: { "response": str, "provider": str, "model": str, "tokens_used": int }
+    Automatically uses Map-Reduce chunking if records > 700 or if token limits are exceeded.
+    Returns: { "response": str, "provider": str, "model": str, "tokens_used": int, "cost_usd": float }
     Raises RuntimeError if no active provider configured.
     """
     config = get_active_config(db)
@@ -390,64 +568,87 @@ def feed_to_llm(db, enhanced_prompt: str, data_rows: list[dict],
     provider = config["provider"]
     model    = config["model"]
     api_key  = config["api_key"]
-    data_text, row_count = _truncate_data(data_rows)
 
-    system_msg = (
-        "You are an expert intelligence analyst. "
-        "You will be given scraped social media and forum data in JSON format, "
-        "followed by an analysis request. "
-        "Be thorough, structured, and professional.\n\n"
-        "MANDATORY DEFAULT RULES — always apply these regardless of the user prompt:\n"
-        "1. DEEP ANALYSIS: Always provide the deepest possible analysis to extract maximum insights from the data. "
-        "Examine every record, cross-reference patterns, identify hidden correlations, and surface non-obvious conclusions. "
-        "Even with limited data, extrapolate intelligently and provide comprehensive commentary.\n"
-        "2. COMPLETE SECTIONS: Every section you produce MUST contain at least 1 substantive bullet point — no section may be left empty. "
-        "If the analysis involves SWOT, each quadrant (Strengths, Weaknesses, Opportunities, Threats) MUST have at least 1 item. "
-        "Recommendations MUST always be present with at least 1 actionable item. "
-        "If data is sparse, derive insights from available signals rather than omitting sections.\n"
-        "3. STRICT PROMPT ADHERENCE: Follow the user's analysis prompt exactly. "
-        "If the user prompt requests specific sections, frameworks, perspectives, or output structures, "
-        "you MUST produce every single one of them as a separate ## section. Do not merge, skip, or abbreviate any requested section.\n\n"
-        "FORMATTING RULES — follow these exactly:\n"
-        "- Structure your response using Markdown.\n"
-        "- Use ## (H2) headings for each major section (e.g. ## Key Trends, ## Sentiment, ## Recommendations).\n"
-        "- Use ### (H3) for sub-sections within a section.\n"
-        "- Use bullet lists (- item) for unordered findings and numbered lists (1. item) for ranked or sequential items.\n"
-        "- Use **bold** to highlight key terms, platform names, or important numbers.\n"
-        "- For key binary or categorical conclusions (sentiment verdict, trend direction, risk level, verification status, etc.), "
-        "place them on their own line using the pattern **Label**: Value (e.g. **Sentiment**: Positive, **Trend**: Bullish, "
-        "**Verified**: True, **Confidence**: High, **Risk**: Low). Group related metrics together with no blank lines between them.\n"
-        "- Always open your response with a ## Key Metrics section that contains ONLY **Label**: Value lines and no prose. "
-        "Required lines: **Positive Sentiment**: XX% and **Negative Sentiment**: XX% (estimate from overall data tone, must sum to 100%), "
-        "**Key Findings**: N (total significant insights you will present in the Key Findings section), **Key Topics**: N (distinct topics or themes). "
-        "If the subject involves risks also add **Risks**: N; if it involves opportunities add **Opportunities**: N. "
-        "This section drives the summary dashboard and must be the first ## section.\n"
-        "- Use the section heading '## Key Topics' when listing themes, topics, or categories, and list each one as a bullet item.\n"
-        "- Always include a dedicated '## Key Findings' section directly before '## Recommendations' that presents the core, most critical and impactful findings discovered across the data as distinct, comprehensive bullet points. The number of bullet points here must match the **Key Findings** count.\n"
-        "- Use the section heading '## Recommendations' for actionable strategic advice and next steps.\n"
-        "- Always conclude your response with a '## Top Sources' section at the very end that lists the top 3 data sources included in the analysis sorted by percentage from highest to lowest, followed by 'Others' with the remaining percentage if applicable.\n"
-        "- If the user's prompt requests a specific structure or output format, honour it within these Markdown conventions."
-    )
-    user_msg = (
-        f"=== SCRAPED DATA ({row_count} records) ===\n\n"
-        f"{data_text}\n\n"
-        f"=== ANALYSIS REQUEST ===\n\n"
-        f"{enhanced_prompt}"
-    )
+    if not data_rows:
+        raise RuntimeError("No records provided for analysis.")
 
-    if provider == "openai":
-        result = _call_openai(db, api_key, model, system_msg, user_msg, keyword)
-    elif provider == "anthropic":
-        result = _call_anthropic(db, api_key, model, system_msg, user_msg, keyword)
-    elif provider == "gemini":
-        result = _call_gemini(db, api_key, model, system_msg, user_msg, keyword)
-    else:
-        raise RuntimeError(f"Unknown provider: {provider}")
+    # If records > 700, immediately use Map-Reduce chunking (500 records/chunk)
+    if len(data_rows) > 700:
+        return _map_reduce_feed_to_llm(
+            db, provider, model, api_key, enhanced_prompt, data_rows, keyword, chunk_size=500
+        )
 
-    if isinstance(result, dict) and "response" in result:
-        result["response"] = _append_or_sync_top_sources(result["response"], data_rows)
+    # Otherwise (≤ 700 records), attempt fast single direct pass with automatic fallback
+    try:
+        data_text, row_count = _truncate_data(data_rows)
 
-    return result
+        system_msg = (
+            "You are an expert intelligence analyst. "
+            "You will be given scraped social media and forum data in JSON format, "
+            "followed by an analysis request. "
+            "Be thorough, structured, and professional.\n\n"
+            "MANDATORY DEFAULT RULES — always apply these regardless of the user prompt:\n"
+            "1. DEEP ANALYSIS: Always provide the deepest possible analysis to extract maximum insights from the data. "
+            "Examine every record, cross-reference patterns, identify hidden correlations, and surface non-obvious conclusions. "
+            "Even with limited data, extrapolate intelligently and provide comprehensive commentary.\n"
+            "2. COMPLETE SECTIONS: Every section you produce MUST contain at least 1 substantive bullet point — no section may be left empty. "
+            "If the analysis involves SWOT, each quadrant (Strengths, Weaknesses, Opportunities, Threats) MUST have at least 1 item. "
+            "Recommendations MUST always be present with at least 1 actionable item. "
+            "If data is sparse, derive insights from available signals rather than omitting sections.\n"
+            "3. STRICT PROMPT ADHERENCE: Follow the user's analysis prompt exactly. "
+            "If the user prompt requests specific sections, frameworks, perspectives, or output structures, "
+            "you MUST produce every single one of them as a separate ## section. Do not merge, skip, or abbreviate any requested section.\n\n"
+            "FORMATTING RULES — follow these exactly:\n"
+            "- Structure your response using Markdown.\n"
+            "- Use ## (H2) headings for each major section (e.g. ## Key Trends, ## Sentiment, ## Recommendations).\n"
+            "- Use ### (H3) for sub-sections within a section.\n"
+            "- Use bullet lists (- item) for unordered findings and numbered lists (1. item) for ranked or sequential items.\n"
+            "- Use **bold** to highlight key terms, platform names, or important numbers.\n"
+            "- For key binary or categorical conclusions (sentiment verdict, trend direction, risk level, verification status, etc.), "
+            "place them on their own line using the pattern **Label**: Value (e.g. **Sentiment**: Positive, **Trend**: Bullish, "
+            "**Verified**: True, **Confidence**: High, **Risk**: Low). Group related metrics together with no blank lines between them.\n"
+            "- Always open your response with a ## Key Metrics section that contains ONLY **Label**: Value lines and no prose. "
+            "Required lines: **Positive Sentiment**: XX% and **Negative Sentiment**: XX% (estimate from overall data tone, must sum to 100%), "
+            "**Key Findings**: N (total significant insights you will present in the Key Findings section), **Key Topics**: N (distinct topics or themes). "
+            "If the subject involves risks also add **Risks**: N; if it involves opportunities add **Opportunities**: N. "
+            "This section drives the summary dashboard and must be the first ## section.\n"
+            "- Use the section heading '## Key Topics' when listing themes, topics, or categories, and list each one as a bullet item.\n"
+            "- Always include a dedicated '## Key Findings' section directly before '## Recommendations' that presents the core, most critical and impactful findings discovered across the data as distinct, comprehensive bullet points. The number of bullet points here must match the **Key Findings** count.\n"
+            "- Use the section heading '## Recommendations' for actionable strategic advice and next steps.\n"
+            "- Always conclude your response with a '## Top Sources' section at the very end that lists the top 3 data sources included in the analysis sorted by percentage from highest to lowest, followed by 'Others' with the remaining percentage if applicable.\n"
+            "- If the user's prompt requests a specific structure or output format, honour it within these Markdown conventions."
+        )
+        user_msg = (
+            f"=== SCRAPED DATA ({row_count} records) ===\n\n"
+            f"{data_text}\n\n"
+            f"=== ANALYSIS REQUEST ===\n\n"
+            f"{enhanced_prompt}"
+        )
+
+        if provider == "openai":
+            result = _call_openai(db, api_key, model, system_msg, user_msg, keyword)
+        elif provider == "anthropic":
+            result = _call_anthropic(db, api_key, model, system_msg, user_msg, keyword)
+        elif provider == "gemini":
+            result = _call_gemini(db, api_key, model, system_msg, user_msg, keyword)
+        else:
+            raise RuntimeError(f"Unknown provider: {provider}")
+
+        if isinstance(result, dict) and "response" in result:
+            result["response"] = _append_or_sync_top_sources(result["response"], data_rows)
+
+        return result
+    except Exception as exc:
+        if _is_token_limit_error(exc) and len(data_rows) > 1:
+            logger.warning(
+                "Direct single-pass call for %d records exceeded token limit (%s). Falling back to Map-Reduce...",
+                len(data_rows), exc,
+            )
+            fallback_chunk_size = max(50, len(data_rows) // 2)
+            return _map_reduce_feed_to_llm(
+                db, provider, model, api_key, enhanced_prompt, data_rows, keyword, chunk_size=fallback_chunk_size
+            )
+        raise
 
 
 def _call_openai(db, api_key: str, model: str, system_msg: str,

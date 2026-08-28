@@ -17,6 +17,7 @@ from database import get_db
 
 logger = logging.getLogger("smart_brain")
 router = APIRouter(prefix="/api/smart-brain", tags=["SmartBrain"])
+webhook_router = APIRouter(prefix="/api/webhook/smart-brain", tags=["SmartBrainWebhook"])
 
 
 # ── Request schemas ───────────────────────────────────────────────────────────
@@ -26,6 +27,12 @@ class SmartBrainRunRequest(BaseModel):
     run_ids:     List[int]
     max_per_run: int  = 100
     keyword:     str  = ""
+
+
+class SmartBrainBatchRunRequest(BaseModel):
+    batch_id:   str
+    prompt:     str | None = None
+    chunk_size: int | None = 500
 
 
 class SmartBrainEnhanceSingleRequest(BaseModel):
@@ -501,3 +508,160 @@ def delete_saved_prompt(
     db.delete(prompt)
     db.commit()
     return {"deleted": prompt_id}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Batch Inspection & Manual Map-Reduce Endpoints (Zero-Auth & Authenticated)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _list_batches_impl(db: Session) -> dict:
+    from db_models import ScrapeRun
+
+    runs = db.query(ScrapeRun).filter(ScrapeRun.batch_id.isnot(None)).order_by(ScrapeRun.scraped_at.desc()).all()
+    if not runs:
+        return {"total_batches": 0, "batches": []}
+
+    batches_map: dict[str, dict] = {}
+    for r in runs:
+        bid = r.batch_id
+        if bid not in batches_map:
+            batches_map[bid] = {
+                "batch_id":      bid,
+                "total_records": 0,
+                "run_count":     0,
+                "scrapers":      set(),
+                "keywords":      set(),
+                "started_at":    r.scraped_at.isoformat() if r.scraped_at else None,
+                "run_ids":       [],
+            }
+        b = batches_map[bid]
+        b["total_records"] += (r.total_items or 0)
+        b["run_count"]     += 1
+        b["run_ids"].append(r.id)
+        if r.scraper:
+            b["scrapers"].add(r.scraper)
+        if r.keyword:
+            b["keywords"].add(r.keyword)
+
+    result = []
+    for bid, data in batches_map.items():
+        result.append({
+            "batch_id":      bid,
+            "total_records": data["total_records"],
+            "run_count":     data["run_count"],
+            "scrapers":      sorted(list(data["scrapers"])),
+            "keywords":      sorted(list(data["keywords"])),
+            "started_at":    data["started_at"],
+            "run_ids":       data["run_ids"],
+        })
+
+    return {"total_batches": len(result), "batches": result}
+
+
+def _execute_batch_smart_brain(db: Session, batch_id: str, custom_prompt: str | None = None, chunk_size: int = 500) -> dict:
+    from db_models import ScrapeRun, SavedPrompt, SmartBrainAnalysis
+    from llm_service import feed_to_llm
+
+    # 1. Fetch all runs matching this batch
+    runs = db.query(ScrapeRun).filter(ScrapeRun.batch_id == batch_id).all()
+    if not runs:
+        raise HTTPException(status_code=404, detail=f"No scrape runs found for batch_id: {batch_id}")
+
+    # 2. Extract records across all runs in this batch (high max_per_run to include all records)
+    data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=10000)
+    if not data_rows:
+        raise HTTPException(status_code=400, detail=f"No scraped records found in database for batch_id: {batch_id}")
+
+    # 3. Resolve Prompt
+    prompt_text = (custom_prompt or "").strip()
+    if not prompt_text:
+        saved = db.query(SavedPrompt).order_by(SavedPrompt.created_at.desc()).first()
+        if saved and saved.text:
+            prompt_text = saved.text
+        else:
+            prompt_text = "Perform a thorough intelligence analysis. Identify key trends, sentiment distribution, critical findings, and actionable recommendations."
+
+    logger.info(
+        "Executing batch Smart Brain on batch %s (%d records, chunk_size=%d)",
+        batch_id[:8], len(data_rows), chunk_size,
+    )
+
+    # 4. Run Map-Reduce Analysis (handles 500 chunks + 250 recursive fallback)
+    try:
+        result = feed_to_llm(
+            db=db,
+            enhanced_prompt=prompt_text,
+            data_rows=data_rows,
+            keyword=f"Batch {batch_id[:8]}",
+        )
+    except RuntimeError as exc:
+        logger.error("Batch Smart Brain failed for batch %s: %s", batch_id[:8], exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # 5. Persist to PostgreSQL smart_brain_analyses
+    entry = SmartBrainAnalysis(
+        result          = result.get("response", ""),
+        provider        = result.get("provider", "openai"),
+        model           = result.get("model", ""),
+        tokens_used     = result.get("tokens_used", 0),
+        cost_usd        = result.get("cost_usd", 0.0),
+        enhanced_prompt = "",
+        prompt_used     = prompt_text,
+        record_count    = len(data_rows),
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+
+    logger.info(
+        "Batch Smart Brain saved (id=%d, records=%d, tokens=%d, cost=$%.6f)",
+        entry.id, len(data_rows), entry.tokens_used, entry.cost_usd,
+    )
+
+    return {
+        "status":           "completed",
+        "analysis_id":      entry.id,
+        "batch_id":         batch_id,
+        "record_count":     len(data_rows),
+        "tokens_used":      entry.tokens_used,
+        "cost_usd":         entry.cost_usd,
+        "provider":         entry.provider,
+        "model":            entry.model,
+        "prompt_used":      prompt_text,
+        "response":         entry.result,
+        "created_at":       entry.created_at.isoformat() if entry.created_at else None,
+    }
+
+
+# ── Authenticated Routes ───────────────────────────────────────────────────────
+
+@router.get("/batches")
+def list_batches_auth(db: Session = Depends(get_db)):
+    return _list_batches_impl(db)
+
+
+@router.post("/run-batch")
+def run_batch_auth(payload: SmartBrainBatchRunRequest, db: Session = Depends(get_db)):
+    return _execute_batch_smart_brain(db, payload.batch_id, payload.prompt, payload.chunk_size or 500)
+
+
+@router.post("/batches/{batch_id}/run")
+def run_batch_path_auth(batch_id: str = FPath(...), db: Session = Depends(get_db)):
+    return _execute_batch_smart_brain(db, batch_id)
+
+
+# ── Webhook / Zero-Auth Routes (No Authorization header needed) ────────────────
+
+@webhook_router.get("/batches")
+def list_batches_webhook(db: Session = Depends(get_db)):
+    return _list_batches_impl(db)
+
+
+@webhook_router.post("/run-batch")
+def run_batch_webhook(payload: SmartBrainBatchRunRequest, db: Session = Depends(get_db)):
+    return _execute_batch_smart_brain(db, payload.batch_id, payload.prompt, payload.chunk_size or 500)
+
+
+@webhook_router.post("/batches/{batch_id}/run")
+def run_batch_path_webhook(batch_id: str = FPath(...), db: Session = Depends(get_db)):
+    return _execute_batch_smart_brain(db, batch_id)

@@ -158,6 +158,7 @@ def create_app() -> FastAPI:
     application.include_router(newsletter.router)
     application.include_router(keywords.router)
     application.include_router(smart_brain.router)
+    application.include_router(smart_brain.webhook_router)
     application.include_router(search.router)
     application.include_router(stats.router)
     application.include_router(results.router)
