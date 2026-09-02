@@ -79,7 +79,7 @@ def _liql(query: str, label: str = "") -> List[dict]:
             f"{BASE_URL}/search",
             params={"q": query},
             headers=HEADERS,
-            timeout=30,
+            timeout=60,
         )
         if resp.status_code != 200:
             logger.warning("LiQL HTTP %d [%s]: %s", resp.status_code, label, resp.text[:200])
@@ -103,7 +103,7 @@ def _rest_get(path: str, label: str = "") -> dict:
         resp = requests.get(
             f"{BASE_URL}{path}",
             headers=HEADERS,
-            timeout=30,
+            timeout=60,
         )
         if resp.status_code != 200:
             logger.warning("REST HTTP %d [%s]", resp.status_code, label)

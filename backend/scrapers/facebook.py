@@ -194,7 +194,7 @@ def run(cfg) -> dict:
         _CONN_BACKOFF   = [5, 15, 30]   # seconds between connection retries
         while True:
             try:
-                resp = _requests.get(_ENDPOINT, headers=headers, params=params, timeout=60)
+                resp = _requests.get(_ENDPOINT, headers=headers, params=params, timeout=90)
             except _requests.exceptions.ConnectionError as exc:
                 _conn_attempt += 1
                 if _conn_attempt >= _MAX_CONN_RETRY:
@@ -212,7 +212,7 @@ def run(cfg) -> dict:
             except _requests.exceptions.Timeout:
                 raise RuntimeError(
                     "ScrapeCreators request timed out — try again later."
-                    "|||Request to api.scrapecreators.com timed out after 60 s"
+                    "|||Request to api.scrapecreators.com timed out after 90 s"
                 )
             except _requests.exceptions.RequestException as exc:
                 raise RuntimeError(f"Facebook API request failed: {exc}") from exc

@@ -31,8 +31,70 @@ from database import get_db
 logger = logging.getLogger("scrapers")
 router = APIRouter(tags=["Run"])
 
-# ── Global ThreadPoolExecutor for concurrent scraper tasks ─────────────────────
-_AUTO_SCRAPE_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="auto_scraper_worker")
+# ── Stale-task watchdog ─────────────────────────────────────────────────────
+# A scraper task whose worker thread hangs on an un-timed-out network call
+# (e.g. a proxy that never responds) never reaches the finally block in
+# _run_scraper, so it would otherwise show as "running" forever. This is a
+# safety net for genuine zombies only — a single (scraper, keyword) task can
+# legitimately run long under heavy pagination/rate-limit backoff, and a
+# 50+-keyword auto-scrape batch is expected to take many hours end-to-end, so
+# this threshold must stay well above any realistic in-progress duration.
+_STALE_TASK_MAX_AGE_MINUTES = 240
+
+
+def _sweep_stale_tasks(db=None, max_age_minutes: int = _STALE_TASK_MAX_AGE_MINUTES) -> int:
+    """Mark tasks stuck in queued/running past max_age_minutes as failed, both
+    in the in-memory registry (drives the /api/status 'running' badge) and in
+    the TaskHistory DB table (survives across process restarts). Returns the
+    number of tasks swept."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+    stale_msg = f"Stale task — no completion after {max_age_minutes} min, worker likely hung (marked failed by watchdog)"
+    swept = 0
+
+    for t in state.task_registry.values():
+        if t.get("status") not in ("queued", "running"):
+            continue
+        try:
+            started = datetime.fromisoformat(t["started_at"])
+        except Exception:
+            continue
+        if started > cutoff:
+            continue
+        t.update({
+            "status":      "failed",
+            "error":       stale_msg,
+            "finished_at": datetime.now(tz=timezone.utc).isoformat(),
+        })
+        swept += 1
+
+    if db is not None:
+        try:
+            from db_models import TaskHistory
+            rows = (
+                db.query(TaskHistory)
+                .filter(TaskHistory.status.in_(["queued", "running"]))
+                .filter(TaskHistory.started_at < cutoff)
+                .all()
+            )
+            for row in rows:
+                row.status      = "failed"
+                row.error       = stale_msg[:500]
+                row.finished_at = datetime.now(tz=timezone.utc)
+            if rows:
+                db.commit()
+        except Exception as exc:
+            logger.warning("Stale-task DB sweep failed: %s", exc)
+            db.rollback()
+
+    for s in state.scraper_status:
+        state.scraper_status[s]["running"] = any(
+            t.get("scraper") == s and t.get("status") in ("queued", "running")
+            for t in state.task_registry.values()
+        )
+
+    if swept:
+        logger.warning("Stale-task watchdog: swept %d stuck task(s)", swept)
+    return swept
 
 
 # ── Scraper loader ────────────────────────────────────────────────────────────
@@ -406,8 +468,13 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
 def _run_all_auto_scrape_parallel(task_specs: list[tuple[str, str, Any]], batch_id: str) -> None:
     """
     Parallel background coordinator:
-      1. Dispatches all scraper tasks simultaneously to ThreadPoolExecutor
-      2. Waits for all parallel scraper tasks to finish (timeout 45 min)
+      1. Dispatches all scraper tasks simultaneously to a ThreadPoolExecutor
+         created fresh for this batch (so a wedged call in one batch can
+         never permanently eat worker capacity from later batches)
+      2. Waits for every task in the batch to finish — no time limit, since
+         a 50+-keyword batch is expected to legitimately take many hours.
+         Each individual task is still bounded by its own HTTP-call timeouts
+         and the stale-task watchdog, so this wait is never truly unbounded.
       3. Loads all scraped records for this batch from DB
       4. Fetches the most recently saved Smart Brain prompt
       5. Runs LLM analysis and saves result to smart_brain_analyses
@@ -420,15 +487,19 @@ def _run_all_auto_scrape_parallel(task_specs: list[tuple[str, str, Any]], batch_
     logger.info("Auto-scheduler coordinator started (PARALLEL) — batch %s, %d tasks", batch_id[:8], len(task_ids))
 
     # ── Submit all tasks simultaneously in parallel ───────────────────────────
+    pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(max(len(task_specs), 1), 32),
+        thread_name_prefix=f"auto_scraper_{batch_id[:8]}",
+    )
     futures = [
-        _AUTO_SCRAPE_POOL.submit(_run_scraper, tid, scraper, cfg)
+        pool.submit(_run_scraper, tid, scraper, cfg)
         for tid, scraper, cfg in task_specs
     ]
 
-    # ── Await completion of all parallel futures (up to 45 min) ───────────────
-    done, not_done = concurrent.futures.wait(futures, timeout=45 * 60)
-    if not_done:
-        logger.warning("Auto-scheduler batch %s timed out after 45 min — %d tasks still running", batch_id[:8], len(not_done))
+    # ── Await completion of every task in the batch — no timeout ─────────────
+    concurrent.futures.wait(futures)
+    pool.shutdown(wait=True)
+    logger.info("Auto-scheduler batch %s: all %d tasks finished", batch_id[:8], len(task_ids))
 
     # ── Collect scraped records for this batch ────────────────────────────────
     db = _db.SessionLocal() if _db.SessionLocal else None
@@ -623,6 +694,12 @@ async def auto_scrape_all(
     now = datetime.now(timezone.utc)
     from db_models import ScraperKeyword, ScraperKeywordSelection, FacebookGroup, UserPreferences
     import json as _json
+
+    # Self-heal before dispatching new work: a scraper task hung on a previous
+    # run (e.g. a proxy call with no timeout) never reaches _run_scraper's
+    # finally block, so without this it would show "running" forever and
+    # never free up capacity for new runs.
+    _sweep_stale_tasks(db)
 
     max_items = 50
 

@@ -57,7 +57,7 @@ def _fetch(url: str, render: bool = False) -> Optional[BeautifulSoup]:
         "render": "true" if render else "false",
     }
     try:
-        resp = requests.get(SCRAPEDO_API, params=params, timeout=60)
+        resp = requests.get(SCRAPEDO_API, params=params, timeout=90)
     except requests.exceptions.ConnectionError as exc:
         raise RuntimeError(
             f"Server is on maintenance, Please try again later.|||Scrape.do unreachable: {exc}"

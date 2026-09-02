@@ -43,7 +43,7 @@ def _search_posts(cfg: TikTokConfig) -> List[dict]:
                 f"{BASE_URL}/v1/tiktok/search/hashtag",
                 headers=_headers(cfg.api_key),
                 params=params,
-                timeout=30,
+                timeout=60,
             )
             if resp.status_code != 200:
                 logger.error("TikTok search %d: %s", resp.status_code, resp.text[:300])
@@ -124,7 +124,7 @@ def _fetch_comments(cfg: TikTokConfig, video_url: str) -> List[dict]:
                 f"{BASE_URL}/v1/tiktok/video/comments",
                 headers=_headers(cfg.api_key),
                 params=params,
-                timeout=30,
+                timeout=60,
             )
             if resp.status_code != 200:
                 break

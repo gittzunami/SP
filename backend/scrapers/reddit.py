@@ -116,7 +116,7 @@ def _get_json(url: str, params: dict = None) -> dict:
             r = requests.get(
                 request_url,
                 headers=HEADERS,
-                timeout=60,   # scrape.do may take longer than a direct request
+                timeout=90,   # scrape.do may take longer than a direct request
             )
 
             if r.status_code == 429:

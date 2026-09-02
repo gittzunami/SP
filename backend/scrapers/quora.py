@@ -83,7 +83,7 @@ def _scrappa_page(keyword: str, page: int) -> List[dict]:
             SCRAPPA_BASE,
             params={"query": f"site:quora.com {keyword}", "page": page},
             headers={"X-API-KEY": SCRAPPA_KEY},
-            timeout=30,
+            timeout=60,
         )
     except requests.exceptions.ConnectionError as exc:
         raise RuntimeError(
@@ -145,7 +145,7 @@ def _fetch_page(url: str) -> Optional[str]:
 
     for attempt in range(1, 4):
         try:
-            resp = requests.get(SCRAPEDO_BASE, params=params, timeout=60)
+            resp = requests.get(SCRAPEDO_BASE, params=params, timeout=90)
             if resp.status_code == 200:
                 logger.info("Quora: fetched %d chars — %s", len(resp.text), url[:60])
                 return resp.text

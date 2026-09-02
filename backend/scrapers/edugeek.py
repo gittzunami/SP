@@ -57,7 +57,7 @@ def _get_page(client: ScrapingBeeClient, url: str) -> Optional[BeautifulSoup]:
             "country_code":    "gb",
             "block_resources": True,
             "wait":            3000,
-        })
+        }, timeout=180)
         if resp.status_code == 200:
             return BeautifulSoup(resp.content, "html.parser")
         if resp.status_code == 401:

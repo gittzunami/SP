@@ -105,7 +105,7 @@ def _fetch_page(api_key: str, query: str, cursor: str = "") -> dict:
             "https://api.getxapi.com/twitter/tweet/advanced_search",
             headers={"Authorization": f"Bearer {api_key}"},
             params=params,
-            timeout=30,
+            timeout=60,
         )
     except requests.exceptions.ConnectionError as exc:
         raise RuntimeError(

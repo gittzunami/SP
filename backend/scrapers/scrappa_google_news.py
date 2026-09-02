@@ -77,7 +77,7 @@ def _fetch_page(api_key: str, q: str, lang: str, country: str, page: int, sort: 
         params["gl"] = country
 
     try:
-        resp = requests.get(BASE_URL, headers=headers, params=params, timeout=30)
+        resp = requests.get(BASE_URL, headers=headers, params=params, timeout=60)
     except requests.exceptions.ConnectionError as exc:
         raise RuntimeError(
             f"Server is on maintenance, Please try again later.|||Scrappa unreachable: {exc}"

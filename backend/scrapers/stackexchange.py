@@ -60,7 +60,7 @@ def _api_get(key: str, path: str, params: dict) -> dict:
     if key:
         params["key"] = key
     try:
-        resp = requests.get(BASE_URL + path, params=params, timeout=30)
+        resp = requests.get(BASE_URL + path, params=params, timeout=60)
         resp.raise_for_status()
         data = resp.json()
         if data.get("backoff"):

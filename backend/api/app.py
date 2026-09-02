@@ -46,6 +46,19 @@ async def lifespan(app: FastAPI):
     database.init_db()
     sched.get_scheduler()
 
+    # Clean up any TaskHistory rows left "running"/"queued" by a process that
+    # crashed or was killed mid-scrape — a fresh process has no thread backing
+    # them, so they'd otherwise stay stuck forever.
+    if database.SessionLocal is not None:
+        try:
+            db = database.SessionLocal()
+            swept = scrapers._sweep_stale_tasks(db, max_age_minutes=0)
+            db.close()
+            if swept:
+                logger.info("Startup sweep: marked %d stale task(s) from a previous run as failed", swept)
+        except Exception as exc:
+            logger.warning("Startup stale-task sweep failed: %s", exc)
+
     # Restore scraper last_run from DB so cards show correct state after restart
     if database.SessionLocal is not None:
         try:
