@@ -48,16 +48,43 @@ async def lifespan(app: FastAPI):
 
     # Clean up any TaskHistory rows left "running"/"queued" by a process that
     # crashed or was killed mid-scrape — a fresh process has no thread backing
-    # them, so they'd otherwise stay stuck forever.
+    # them, so they'd otherwise stay stuck forever. reason="restarted" makes
+    # the recorded error say "interrupted by restart", not "hung", since a
+    # deploy landing mid-batch is expected and isn't necessarily a real hang.
     if database.SessionLocal is not None:
         try:
             db = database.SessionLocal()
-            swept = scrapers._sweep_stale_tasks(db, max_age_minutes=0)
+            swept = scrapers._sweep_stale_tasks(db, max_age_minutes=0, reason="restarted")
             db.close()
             if swept:
-                logger.info("Startup sweep: marked %d stale task(s) from a previous run as failed", swept)
+                logger.info("Startup sweep: marked %d task(s) interrupted by restart as failed", swept)
         except Exception as exc:
             logger.warning("Startup stale-task sweep failed: %s", exc)
+    # A fresh process has no batch coordinator thread running, so any batch
+    # guard left over (impossible in-memory, but defensive) is cleared too.
+    state.auto_scrape_batch_id = None
+
+    # Independent periodic watchdog: sweeps genuinely stale tasks every 15 min
+    # regardless of when the next webhook call happens to arrive, so the
+    # dashboard's "running" status can't stay wrong for hours in between.
+    def _periodic_stale_sweep() -> None:
+        if database.SessionLocal is None:
+            return
+        db = database.SessionLocal()
+        try:
+            scrapers._sweep_stale_tasks(db)
+        except Exception as exc:
+            logger.warning("Periodic stale-task sweep failed: %s", exc)
+        finally:
+            db.close()
+
+    from apscheduler.triggers.interval import IntervalTrigger
+    sched.get_scheduler().add_job(
+        func=_periodic_stale_sweep,
+        trigger=IntervalTrigger(minutes=15),
+        id="internal_stale_task_sweep",
+        replace_existing=True,
+    )
 
     # Restore scraper last_run from DB so cards show correct state after restart
     if database.SessionLocal is not None:
