@@ -29,11 +29,14 @@ import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.poolmanager import PoolManager
 
+from core.config import settings
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger("newsletter_service")
 
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip("/")
+WEBHOOK_URL = getattr(settings, "WEBHOOK_URL", os.environ.get("WEBHOOK_URL", "")).rstrip("/")
+
 
 # Values treated as "no data" — fields with these values are dropped
 _NULL_VALUES = {"", "n/a", "null", "none", "undefined", "unknown", "na", "not available"}
@@ -257,12 +260,15 @@ def _make_webhook_session() -> requests.Session:
     return session
 
 
-def _webhook_via_powershell(payload: dict) -> bool:
+def _webhook_via_powershell(payload: dict, target_url: str = "") -> bool:
     """Send webhook payload via PowerShell Invoke-RestMethod (uses Windows SChannel)."""
+    url = target_url or settings.WEBHOOK_URL or WEBHOOK_URL
+    if not url:
+        return False
     script = f'''
 $body = $input | ConvertFrom-Json
 try {{
-    $resp = Invoke-RestMethod -Uri "{WEBHOOK_URL}" -Method Post -Body ($body | ConvertTo-Json -Compress) -ContentType "application/json" -UseBasicParsing -ErrorAction Stop
+    $resp = Invoke-RestMethod -Uri "{url}" -Method Post -Body ($body | ConvertTo-Json -Compress -Depth 10) -ContentType "application/json" -UseBasicParsing -ErrorAction Stop
     Write-Output "OK"
 }} catch {{
     Write-Output "FAIL: $($_.Exception.Message)"
@@ -287,40 +293,216 @@ try {{
         return False
 
 
-def send_to_teams_webhook(job_id: str, keyword: str, article_count: int, articles: list[dict]) -> bool:
-    """Send Adaptive Card directly to Power Automate webhook."""
-    if not WEBHOOK_URL:
-        logger.warning("WEBHOOK_URL not set")
+def _send_card_payload(payload: dict, target_url: str = "") -> bool:
+    """
+    Sends an Adaptive Card payload to a target Power Automate / Teams webhook.
+    Uses Python requests with SSLAdapter, falling back to PowerShell on handshake errors.
+    """
+    url = target_url or settings.WEBHOOK_URL or WEBHOOK_URL
+    if not url:
+        logger.warning("No webhook URL configured — skipping Adaptive Card transmission.")
         return False
 
-    adaptive_card = build_adaptive_card(job_id, keyword, article_count, articles)
-
-    # Power Automate "Post Adaptive Card and wait for response" trigger
-    # expects the card wrapped under the key "adaptiveCard"
-    payload = {"adaptiveCard": adaptive_card}
-
-    # Attempt 1: Python requests with custom SSL adapter
     session = _make_webhook_session()
     try:
-        logger.info("Sending Adaptive Card to Power Automate — job %s", job_id)
-        resp = session.post(WEBHOOK_URL, json=payload, timeout=30)
-        logger.info("Power Automate webhook status: %d — %s",
-                    resp.status_code, resp.text[:300] if resp.text else "empty")
-
+        resp = session.post(url, json=payload, timeout=30)
+        logger.info("Adaptive Card POST status: %d (%s)", resp.status_code, url[:50])
         if resp.status_code in (200, 201, 202):
-            logger.info("Adaptive Card sent successfully")
             return True
         else:
-            logger.warning("Unexpected status from Power Automate: %d", resp.status_code)
+            logger.warning("Unexpected status from webhook: %d — %s", resp.status_code, resp.text[:200])
             return False
     except Exception as exc:
         logger.error("Python requests failed: %s — falling back to PowerShell", exc)
     finally:
         session.close()
 
-    # Attempt 2: PowerShell Invoke-RestMethod (uses Windows SChannel, avoids OpenSSL)
-    logger.info("Falling back to PowerShell for webhook — job %s", job_id)
-    return _webhook_via_powershell(payload)
+    return _webhook_via_powershell(payload, target_url=url)
+
+
+def send_to_teams_webhook(job_id: str, keyword: str, article_count: int, articles: list[dict]) -> bool:
+    """Send article selection Adaptive Card directly to Power Automate webhook."""
+    target_url = settings.WEBHOOK_URL or WEBHOOK_URL
+    if not target_url:
+        logger.warning("WEBHOOK_URL not set")
+        return False
+
+    adaptive_card = build_adaptive_card(job_id, keyword, article_count, articles)
+    payload = {"adaptiveCard": adaptive_card}
+    logger.info("Sending initial article selection card for job %s to Teams", job_id)
+    return _send_card_payload(payload, target_url)
+
+
+# ── Individual Generated Newsletter Adaptive Card Builder ─────────────────────
+
+def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = "") -> dict:
+    """
+    Build an individual Adaptive Card for a generated newsletter with 3 choices:
+      1. Action.OpenUrl -> '✏️ Edit in App' (Opens frontend directly in live edit mode)
+      2. Action.Submit  -> '📁 Save as Draft' (Creates Mailchimp draft without UI popup)
+      3. Action.Submit  -> '✈️ Send via Mailchimp' (Broadcasts via Mailchimp without UI popup)
+    """
+    f_url = (frontend_url or getattr(settings, "FRONTEND_URL", "") or "http://localhost:5173").rstrip("/")
+    nl_id = newsletter.get("id")
+    title = (newsletter.get("title") or "Generated Newsletter").strip()
+    article_date = newsletter.get("article_date") or ""
+
+    content = newsletter.get("content") or {}
+    if isinstance(content, str):
+        try:
+            content = json.loads(content)
+        except Exception:
+            content = {}
+
+    hook = str(content.get("hook_paragraph") or "").strip()
+    stat = str(content.get("stat_paragraph") or "").strip()
+    highlight_stat = str(content.get("highlight_stat") or "").strip()
+    context = str(content.get("context_paragraph") or "").strip()
+    solution = str(content.get("solution_paragraph") or "").strip()
+    cta_label = str(content.get("cta_label") or "👉 Schedule a discovery call").strip()
+    full_text = str(content.get("full_text") or "").strip()
+
+    body_items: list[dict] = [
+        {
+            "type": "Container",
+            "style": "emphasis",
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": f"📰 **Newsletter #{nl_id}: {title}**",
+                    "weight": "Bolder",
+                    "size": "Medium",
+                    "wrap": True,
+                },
+                {
+                    "type": "TextBlock",
+                    "text": f"📅 Date: {article_date} · Tzunami Marketing Digest",
+                    "isSubtle": True,
+                    "size": "Small",
+                    "spacing": "None",
+                    "wrap": True,
+                },
+            ],
+        },
+    ]
+
+    if full_text:
+        body_items.append({
+            "type": "TextBlock",
+            "text": full_text[:1200],
+            "wrap": True,
+            "spacing": "Medium",
+        })
+    else:
+        if hook:
+            body_items.append({
+                "type": "TextBlock",
+                "text": f"**💡 Hook:**\n{hook}",
+                "wrap": True,
+                "spacing": "Small",
+            })
+        if stat:
+            stat_text = f"**📊 Key Stat & Source:**\n{stat}"
+            if highlight_stat and highlight_stat in stat:
+                stat_text += f"\n*(Key metric: **{highlight_stat}**)*"
+            body_items.append({
+                "type": "TextBlock",
+                "text": stat_text,
+                "wrap": True,
+                "spacing": "Small",
+            })
+        if context:
+            body_items.append({
+                "type": "TextBlock",
+                "text": f"**🌐 Industry Context:**\n{context}",
+                "wrap": True,
+                "spacing": "Small",
+            })
+        if solution:
+            body_items.append({
+                "type": "TextBlock",
+                "text": f"**🛡️ Tzunami Solution:**\n{solution}",
+                "wrap": True,
+                "spacing": "Small",
+            })
+
+    body_items.append({
+        "type": "TextBlock",
+        "text": f"**CTA Action:** `{cta_label}`",
+        "isSubtle": True,
+        "size": "Small",
+        "spacing": "Medium",
+        "wrap": True,
+    })
+
+    edit_url = f"{f_url}/newsletters?id={nl_id}&edit=true"
+
+    actions = [
+        {
+            "type": "Action.OpenUrl",
+            "title": "✏️ Edit in App",
+            "url": edit_url,
+        },
+        {
+            "type": "Action.Submit",
+            "title": "📁 Save as Draft",
+            "style": "default",
+            "data": {
+                "action": "newsletter_draft",
+                "newsletter_id": nl_id,
+            },
+        },
+        {
+            "type": "Action.Submit",
+            "title": "✈️ Send via Mailchimp",
+            "style": "positive",
+            "data": {
+                "action": "newsletter_send",
+                "newsletter_id": nl_id,
+            },
+        },
+    ]
+
+    return {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": body_items,
+        "actions": actions,
+    }
+
+
+def send_newsletter_cards_to_teams(db, newsletters: list[dict]) -> int:
+    """
+    Sends an individual Adaptive Card for each newly generated newsletter to Microsoft Teams.
+    Includes a 300ms inter-card pacing delay to protect against rate limiting.
+    """
+    target_url = getattr(settings, "NEWSLETTER_ACTIONS_WEBHOOK_URL", "") or getattr(settings, "WEBHOOK_URL", "") or WEBHOOK_URL
+    if not target_url:
+        logger.warning("No webhook URL configured — skipping Teams newsletter card dispatch.")
+        return 0
+
+    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+    sent_count = 0
+
+    for idx, nl in enumerate(newsletters):
+        try:
+            card = build_newsletter_action_adaptive_card(nl, frontend_url=frontend_url)
+            payload = {"adaptiveCard": card}
+            ok = _send_card_payload(payload, target_url)
+            if ok:
+                sent_count += 1
+                logger.info("Sent newsletter action card %d/%d (ID: %s) to Teams", idx + 1, len(newsletters), nl.get("id"))
+            else:
+                logger.warning("Failed to send newsletter action card %d/%d (ID: %s) to Teams", idx + 1, len(newsletters), nl.get("id"))
+            if idx < len(newsletters) - 1:
+                time.sleep(0.3)
+        except Exception as exc:
+            logger.error("Error sending newsletter action card for ID %s to Teams: %s", nl.get("id"), exc)
+
+    logger.info("Dispatched %d/%d newsletter action Adaptive Cards to Microsoft Teams.", sent_count, len(newsletters))
+    return sent_count
+
 
 
 # ── Article content fetcher ───────────────────────────────────────────────────
@@ -659,6 +841,13 @@ def process_webhook_response(db, job_id: str, approved: bool,
         newsletters = _generate_newsletters(db, job_id, selected_articles, job.keyword or "")
         logger.info("Job %s: %d newsletters generated", job_id, len(newsletters))
 
+        # Dispatch individual Adaptive Cards for each generated newsletter to Teams
+        try:
+            cards_sent = send_newsletter_cards_to_teams(db, newsletters)
+            logger.info("Job %s: dispatched %d newsletter action cards to Teams", job_id, cards_sent)
+        except Exception as exc:
+            logger.error("Job %s: failed to dispatch newsletter cards to Teams: %s", job_id, exc)
+
         job.status = "completed"
         job.completed_at = _now()
         db.commit()
@@ -698,23 +887,46 @@ def process_webhook_response(db, job_id: str, approved: bool,
 
 def handle_teams_submission(db, raw_body: dict) -> dict:
     """
-    Convenience wrapper called directly by the FastAPI /webhook/google-news/response
-    endpoint when Power Automate POSTs the Teams card submission.
-
-    raw_body example:
-        {
-          "action":     "approve",
-          "job_id":     "a1b2c3d4...",
-          "selected_0": "true",
-          "selected_1": "false",
-          "selected_2": "true"
-        }
+    Convenience wrapper called directly by the FastAPI webhook endpoints.
+    Handles:
+      1. Individual newsletter actions from Teams:
+         - action == "newsletter_draft" -> calls create_and_send_campaign(draft_only=True)
+         - action == "newsletter_send"  -> calls create_and_send_campaign(draft_only=False)
+      2. Initial article selection approval / rejection from Teams.
     """
-    action = raw_body.get("action", "approve")
+    action = raw_body.get("action", "")
+    newsletter_id = raw_body.get("newsletter_id")
+
+    # ── Handle Individual Newsletter Action (Draft or Send from Teams) ────────
+    if action in ("newsletter_draft", "newsletter_send") and newsletter_id:
+        from services.mailchimp_service import create_and_send_campaign
+        is_draft = action == "newsletter_draft"
+        nl_id = int(str(newsletter_id).strip())
+        logger.info("Received Teams newsletter action: %s for newsletter #%d", action, nl_id)
+        try:
+            result = create_and_send_campaign(db, newsletter_id=nl_id, draft_only=is_draft)
+            return {
+                "status": "ok",
+                "action": "draft" if is_draft else "send",
+                "newsletter_id": nl_id,
+                "detail": f"Newsletter #{nl_id} successfully {'saved as draft in' if is_draft else 'broadcasted via'} Mailchimp.",
+                **result,
+            }
+        except Exception as exc:
+            logger.error("Failed to execute Teams %s action for newsletter #%d: %s", action, nl_id, exc)
+            return {
+                "status": "error",
+                "action": "draft" if is_draft else "send",
+                "newsletter_id": nl_id,
+                "detail": str(exc),
+            }
+
+    # ── Initial Article Selection Approval / Rejection ────────────────────────
+    action = action or "approve"
     job_id = raw_body.get("job_id", "")
 
     if not job_id:
-        raise ValueError("job_id missing from Power Automate payload")
+        raise ValueError("job_id or valid newsletter_id is required")
 
     approved = action == "approve"
     reason = "" if approved else raw_body.get("reason", "Rejected via Teams")
@@ -726,6 +938,7 @@ def handle_teams_submission(db, raw_body: dict) -> dict:
         reason=reason,
         response_data=raw_body,
     )
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -869,7 +1082,9 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
         "title": newsletter.title,
         "article_date": newsletter.article_date,
         "article_count": newsletter.article_count,
+        "content": content_parsed,
     }
+
 
 
 def _call_llm_for_newsletter(provider: str, model: str, api_key: str,
@@ -1010,5 +1225,9 @@ def _newsletter_dict(n) -> dict:
         "model": n.model,
         "article_count": n.article_count,
         "content": content,
+        "mailchimp_campaign_id": getattr(n, "mailchimp_campaign_id", None),
+        "mailchimp_status": getattr(n, "mailchimp_status", None),
+        "mailchimp_sent_at": n.mailchimp_sent_at.isoformat() if getattr(n, "mailchimp_sent_at", None) else None,
+        "mailchimp_web_id": getattr(n, "mailchimp_web_id", None),
         "created_at": n.created_at.isoformat() if n.created_at else None,
-    }
+    }

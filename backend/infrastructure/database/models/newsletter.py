@@ -31,17 +31,22 @@ if DB_AVAILABLE:
 
     class GeneratedNewsletter(Base):
         __tablename__ = "generated_newsletters"
-        id            = Column(Integer,     primary_key=True)
-        job_id        = Column(String(64),  nullable=False, index=True)
-        title         = Column(String(300), nullable=False)
-        article_date  = Column(String(20),  nullable=False)
-        provider      = Column(String(50),  nullable=True)
-        model         = Column(String(100), nullable=True)
-        content_json  = Column(Text,        nullable=False)
-        content_raw   = Column(Text,        nullable=True)
-        article_count = Column(Integer,     default=0)
-        created_at    = Column(DateTime(timezone=True), nullable=False)
+        id                    = Column(Integer,     primary_key=True)
+        job_id                = Column(String(64),  nullable=False, index=True)
+        title                 = Column(String(300), nullable=False)
+        article_date          = Column(String(20),  nullable=False)
+        provider              = Column(String(50),  nullable=True)
+        model                 = Column(String(100), nullable=True)
+        content_json          = Column(Text,        nullable=False)
+        content_raw           = Column(Text,        nullable=True)
+        article_count         = Column(Integer,     default=0)
+        mailchimp_campaign_id = Column(String(64),  nullable=True)
+        mailchimp_status      = Column(String(30),  nullable=True)
+        mailchimp_sent_at     = Column(DateTime(timezone=True), nullable=True)
+        mailchimp_web_id      = Column(String(64),  nullable=True)
+        created_at            = Column(DateTime(timezone=True), nullable=False)
 
 else:
     class NewsletterJob: pass        # type: ignore[no-redef]
     class GeneratedNewsletter: pass  # type: ignore[no-redef]
+
