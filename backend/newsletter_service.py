@@ -731,6 +731,14 @@ def send_to_webhook(db, task_id: str, keyword: str, articles: list[dict]) -> dic
     articles = _clean_articles(articles)
     logger.info("send_to_webhook: %d articles after cleaning", len(articles))
 
+    # Sort newest-first and cap at the Adaptive Card display limit. This exact
+    # list/order is what the card shows and indexes as selected_<i>, so it must
+    # also be what raw_articles_json stores — process_webhook_response() later
+    # filters by those same indices, and any mismatch here silently saves the
+    # wrong articles (or ones the user never even saw on the card).
+    sorted_articles = sorted(articles, key=lambda a: a.get("publishedAt") or a.get("published_at") or "", reverse=True)
+    webhook_articles = sorted_articles[:25]
+
     job_id = uuid.uuid4().hex
 
     job = NewsletterJob(
@@ -740,7 +748,7 @@ def send_to_webhook(db, task_id: str, keyword: str, articles: list[dict]) -> dic
         keyword=keyword,
         article_count=len(articles),
         webhook_sent_at=_now(),
-        raw_articles_json=json.dumps(articles, ensure_ascii=False),
+        raw_articles_json=json.dumps(webhook_articles, ensure_ascii=False),
         created_at=_now(),
     )
     db.add(job)
@@ -753,8 +761,6 @@ def send_to_webhook(db, task_id: str, keyword: str, articles: list[dict]) -> dic
     except Exception as exc:
         logger.error("NewsletterJob %s: failed to save articles to DB: %s", job_id, exc)
 
-    sorted_articles = sorted(articles, key=lambda a: a.get("publishedAt") or a.get("published_at") or "", reverse=True)
-    webhook_articles = sorted_articles[:25]
     logger.info("NewsletterJob %s created — %d articles, sending Adaptive Card with %d newest", job_id, len(articles), len(webhook_articles))
 
     send_to_teams_webhook(job_id, keyword, len(articles), webhook_articles)
@@ -868,6 +874,17 @@ def process_webhook_response(db, job_id: str, approved: bool,
         # Generate newsletters for selected articles only
         newsletters = _generate_newsletters(db, job_id, selected_articles, job.keyword or "")
         logger.info("Job %s: %d newsletters generated", job_id, len(newsletters))
+
+        if not newsletters:
+            # Every article failed to generate (bad/expired LLM key, provider
+            # outage, etc.) — surface this as a real failure instead of
+            # silently reporting "completed" with zero newsletters, since
+            # _generate_newsletters swallows per-article errors internally.
+            raise RuntimeError(
+                f"Newsletter generation failed for all {len(selected_articles)} selected "
+                "article(s) — check LLM Configuration (API key may be invalid/expired) "
+                "and backend logs for the underlying error."
+            )
 
         # Dispatch individual Adaptive Cards for each generated newsletter to Teams
         try:
