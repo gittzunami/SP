@@ -209,24 +209,33 @@ def render_newsletter_html(newsletter_dict: Dict[str, Any]) -> str:
     cta_label = str(c.get("cta_label") or "👉 Schedule a discovery call")
     image_data = str(c.get("image_data") or "")
 
+    def _strip_html(s: str) -> str:
+        if not s:
+            return ""
+        cleaned = re.sub(r"<[^>]+>", "", str(s))
+        return html.unescape(cleaned).strip()
+
     def _esc(s: str) -> str:
-        return html.escape(s)
+        return html.escape(_strip_html(s))
 
     def _highlight_stat(text: str, highlight_target: str) -> str:
-        if not highlight_target or not text:
-            return f'<span style="font-size:18px">{_esc(text)}</span>'
-        escaped_target = re.escape(highlight_target)
+        clean_text = _strip_html(text)
+        clean_target = _strip_html(highlight_target)
+
+        if not clean_target or not clean_text:
+            return f'<span style="font-size:18px">{html.escape(clean_text)}</span>'
+        escaped_target = re.escape(clean_target)
         try:
-            parts = re.split(f"({escaped_target})", text, flags=re.IGNORECASE)
+            parts = re.split(f"({escaped_target})", clean_text, flags=re.IGNORECASE)
             result = []
             for p in parts:
-                if p.lower() == highlight_target.lower():
-                    result.append(f'<span style="color:#B22222;font-weight:bold;">{_esc(p)}</span>')
+                if p.lower() == clean_target.lower():
+                    result.append(f'<span style="color:#B22222;font-weight:bold;">{html.escape(p)}</span>')
                 else:
-                    result.append(f'<span style="font-size:18px">{_esc(p)}</span>')
+                    result.append(f'<span style="font-size:18px">{html.escape(p)}</span>')
             return "".join(result)
         except Exception:
-            return f'<span style="font-size:18px">{_esc(text)}</span>'
+            return f'<span style="font-size:18px">{html.escape(clean_text)}</span>'
 
     social_cells = []
     for s in SOCIAL_LINKS:

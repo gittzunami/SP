@@ -36,39 +36,19 @@ router = APIRouter(tags=["Run"])
 # (e.g. a proxy that never responds) never reaches the finally block in
 # _run_scraper, so it would otherwise show as "running" forever. This is a
 # safety net for genuine zombies only — a single (scraper, keyword) task can
-# legitimately run long under heavy pagination/rate-limit backoff (EduGeek
-# especially, since it fetches a full rendered page per thread/reply), and a
+# legitimately run long under heavy pagination/rate-limit backoff, and a
 # 50+-keyword auto-scrape batch is expected to take many hours end-to-end, so
 # this threshold must stay well above any realistic in-progress duration.
-_STALE_TASK_MAX_AGE_MINUTES = 360
+_STALE_TASK_MAX_AGE_MINUTES = 240
 
 
-def _sweep_stale_tasks(
-    db=None,
-    max_age_minutes: int = _STALE_TASK_MAX_AGE_MINUTES,
-    reason: str = "hung",
-) -> int:
+def _sweep_stale_tasks(db=None, max_age_minutes: int = _STALE_TASK_MAX_AGE_MINUTES) -> int:
     """Mark tasks stuck in queued/running past max_age_minutes as failed, both
     in the in-memory registry (drives the /api/status 'running' badge) and in
     the TaskHistory DB table (survives across process restarts). Returns the
-    number of tasks swept.
-
-    reason="hung"      — the watchdog caught this while the process stayed up
-                          the whole time; it really has been running too long.
-    reason="restarted" — called at startup, where "queued"/"running" rows are
-                          leftovers from a process that no longer exists (e.g.
-                          a redeploy interrupted it) — they weren't necessarily
-                          hung, just cut off mid-run with no thread left to
-                          finish them.
-    """
+    number of tasks swept."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
-    if reason == "restarted":
-        stale_msg = (
-            "Task interrupted — the app restarted while this was still running, "
-            "so its progress was lost (not necessarily a hang)"
-        )
-    else:
-        stale_msg = f"Stale task — no completion after {max_age_minutes} min, worker likely hung (marked failed by watchdog)"
+    stale_msg = f"Stale task — no completion after {max_age_minutes} min, worker likely hung (marked failed by watchdog)"
     swept = 0
 
     for t in state.task_registry.values():
@@ -485,153 +465,108 @@ def _run_scraper(task_id: str, scraper: str, cfg) -> None:
 #  Auto-scheduler Smart Brain coordinator (Parallel Multi-Worker)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _wait_for_batch_tasks(futures_by_task: Dict[str, "concurrent.futures.Future"], poll_seconds: int = 60) -> None:
-    """
-    Block until every task in this batch is resolved — but "resolved" means
-    either its thread actually finished, OR the stale-task watchdog has
-    given up on it (past _STALE_TASK_MAX_AGE_MINUTES) and marked it failed.
-
-    This is what makes "no time limit" and "must not get stuck forever" both
-    true at once: a task that's still genuinely working, however long that
-    takes, is never touched — but a task that's truly wedged can only ever
-    hold up the batch for at most _STALE_TASK_MAX_AGE_MINUTES, because once
-    the watchdog reaps it we stop waiting on it (its thread may still be
-    leaked in the background, harmlessly, but the batch moves on).
-    """
-    import time
-    import database as _db
-
-    pending = dict(futures_by_task)
-    while pending:
-        for tid in [t for t, fut in pending.items() if fut.done()]:
-            pending.pop(tid)
-        if not pending:
-            return
-
-        time.sleep(poll_seconds)
-
-        watchdog_db = _db.SessionLocal() if _db.SessionLocal else None
-        try:
-            _sweep_stale_tasks(watchdog_db)
-        finally:
-            if watchdog_db is not None:
-                watchdog_db.close()
-
-        for tid in [
-            t for t in pending
-            if state.task_registry.get(t, {}).get("status") not in ("queued", "running")
-        ]:
-            pending.pop(tid)
-
-
 def _run_all_auto_scrape_parallel(task_specs: list[tuple[str, str, Any]], batch_id: str) -> None:
     """
     Parallel background coordinator:
       1. Dispatches all scraper tasks simultaneously to a ThreadPoolExecutor
          created fresh for this batch (so a wedged call in one batch can
          never permanently eat worker capacity from later batches)
-      2. Waits for every task in the batch to resolve — no time limit, since
+      2. Waits for every task in the batch to finish — no time limit, since
          a 50+-keyword batch is expected to legitimately take many hours.
          Each individual task is still bounded by its own HTTP-call timeouts
-         and the stale-task watchdog (see _wait_for_batch_tasks), so this
-         can never block forever even if one task is truly wedged.
+         and the stale-task watchdog, so this wait is never truly unbounded.
       3. Loads all scraped records for this batch from DB
       4. Fetches the most recently saved Smart Brain prompt
       5. Runs LLM analysis and saves result to smart_brain_analyses
     """
+    import time
     import database as _db
+    from core.container import state as _state
 
     task_ids = [ts[0] for ts in task_specs]
     logger.info("Auto-scheduler coordinator started (PARALLEL) — batch %s, %d tasks", batch_id[:8], len(task_ids))
 
+    # ── Submit all tasks simultaneously in parallel ───────────────────────────
+    pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(max(len(task_specs), 1), 32),
+        thread_name_prefix=f"auto_scraper_{batch_id[:8]}",
+    )
+    futures = [
+        pool.submit(_run_scraper, tid, scraper, cfg)
+        for tid, scraper, cfg in task_specs
+    ]
+
+    # ── Await completion of every task in the batch — no timeout ─────────────
+    concurrent.futures.wait(futures)
+    pool.shutdown(wait=True)
+    logger.info("Auto-scheduler batch %s: all %d tasks finished", batch_id[:8], len(task_ids))
+
+    # ── Collect scraped records for this batch ────────────────────────────────
+    db = _db.SessionLocal() if _db.SessionLocal else None
+    if db is None:
+        logger.error("Auto-scheduler: no DB session available, aborting Smart Brain step")
+        return
+
     try:
-        # ── Submit all tasks simultaneously in parallel ───────────────────────
-        pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(max(len(task_specs), 1), 32),
-            thread_name_prefix=f"auto_scraper_{batch_id[:8]}",
-        )
-        futures = {
-            tid: pool.submit(_run_scraper, tid, scraper, cfg)
-            for tid, scraper, cfg in task_specs
-        }
+        from db_models import ScrapeRun, SavedPrompt
+        from api.routers.smart_brain import _smart_brain_records_for_runs
 
-        # ── Await every task in the batch (see _wait_for_batch_tasks) ────────
-        _wait_for_batch_tasks(futures)
-        pool.shutdown(wait=False)
-        logger.info("Auto-scheduler batch %s: all %d tasks resolved", batch_id[:8], len(task_ids))
-
-        # ── Collect scraped records for this batch ────────────────────────────
-        db = _db.SessionLocal() if _db.SessionLocal else None
-        if db is None:
-            logger.error("Auto-scheduler: no DB session available, aborting Smart Brain step")
+        runs = db.query(ScrapeRun).filter(ScrapeRun.batch_id == batch_id).all()
+        if not runs:
+            logger.warning("Auto-scheduler batch %s: no ScrapeRun rows found — skipping Smart Brain", batch_id[:8])
             return
 
+        # Fetch 100% of all scraped records across all runs in this batch
+        data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=None)
+        if not data_rows:
+            logger.warning("Auto-scheduler batch %s: no records found for Smart Brain", batch_id[:8])
+            return
+
+        # ── Fetch most recently saved prompt ──────────────────────────────────
+        prompt_row = db.query(SavedPrompt).order_by(SavedPrompt.created_at.desc()).first()
+        if not prompt_row:
+            logger.warning("Auto-scheduler batch %s: no saved prompt found — skipping Smart Brain", batch_id[:8])
+            return
+
+        logger.info(
+            "Auto-scheduler batch %s: running Smart Brain on %d records with prompt id=%d",
+            batch_id[:8], len(data_rows), prompt_row.id,
+        )
+
+        # ── Run LLM analysis ──────────────────────────────────────────────────
+        from llm_service import feed_to_llm
         try:
-            from db_models import ScrapeRun, SavedPrompt
-            from api.routers.smart_brain import _smart_brain_records_for_runs
+            result = feed_to_llm(db, prompt_row.text, data_rows, keyword=f"Scheduled Batch {batch_id[:8]}")
+        except RuntimeError as exc:
+            logger.error("Auto-scheduler Smart Brain LLM call failed: %s", exc)
+            return
 
-            runs = db.query(ScrapeRun).filter(ScrapeRun.batch_id == batch_id).all()
-            if not runs:
-                logger.warning("Auto-scheduler batch %s: no ScrapeRun rows found — skipping Smart Brain", batch_id[:8])
-                return
+        # ── Save to smart_brain_analyses ──────────────────────────────────────
+        from db_models import SmartBrainAnalysis
+        entry = SmartBrainAnalysis(
+            result          = result["response"],
+            provider        = result["provider"],
+            model           = result["model"],
+            tokens_used     = result.get("tokens_used", 0),
+            cost_usd        = result.get("cost_usd", 0.0),
+            enhanced_prompt = "",
+            prompt_used     = prompt_row.text,
+            record_count    = len(data_rows),
+        )
+        db.add(entry)
+        db.commit()
+        logger.info(
+            "Auto-scheduler batch %s: Smart Brain analysis saved (id=%d, %d tokens, %d records)",
+            batch_id[:8], entry.id, entry.tokens_used, len(data_rows),
+        )
 
-            # Fetch 100% of all scraped records across all runs in this batch
-            data_rows = _smart_brain_records_for_runs(db, runs, max_per_run=None)
-            if not data_rows:
-                logger.warning("Auto-scheduler batch %s: no records found for Smart Brain", batch_id[:8])
-                return
-
-            # ── Fetch most recently saved prompt ────────────────────────────────
-            prompt_row = db.query(SavedPrompt).order_by(SavedPrompt.created_at.desc()).first()
-            if not prompt_row:
-                logger.warning("Auto-scheduler batch %s: no saved prompt found — skipping Smart Brain", batch_id[:8])
-                return
-
-            logger.info(
-                "Auto-scheduler batch %s: running Smart Brain on %d records with prompt id=%d",
-                batch_id[:8], len(data_rows), prompt_row.id,
-            )
-
-            # ── Run LLM analysis ────────────────────────────────────────────────
-            from llm_service import feed_to_llm
-            try:
-                result = feed_to_llm(db, prompt_row.text, data_rows, keyword=f"Scheduled Batch {batch_id[:8]}")
-            except RuntimeError as exc:
-                logger.error("Auto-scheduler Smart Brain LLM call failed: %s", exc)
-                return
-
-            # ── Save to smart_brain_analyses ────────────────────────────────────
-            from db_models import SmartBrainAnalysis
-            entry = SmartBrainAnalysis(
-                result          = result["response"],
-                provider        = result["provider"],
-                model           = result["model"],
-                tokens_used     = result.get("tokens_used", 0),
-                cost_usd        = result.get("cost_usd", 0.0),
-                enhanced_prompt = "",
-                prompt_used     = prompt_row.text,
-                record_count    = len(data_rows),
-            )
-            db.add(entry)
-            db.commit()
-            logger.info(
-                "Auto-scheduler batch %s: Smart Brain analysis saved (id=%d, %d tokens, %d records)",
-                batch_id[:8], entry.id, entry.tokens_used, len(data_rows),
-            )
-
-        except Exception as exc:
-            logger.exception("Auto-scheduler coordinator failed for batch %s: %s", batch_id[:8], exc)
-        finally:
-            try:
-                db.close()
-            except Exception:
-                pass
+    except Exception as exc:
+        logger.exception("Auto-scheduler coordinator failed for batch %s: %s", batch_id[:8], exc)
     finally:
-        # Always release the "batch in progress" guard, even if something
-        # above raised unexpectedly — otherwise no future webhook call could
-        # ever start a new batch again.
-        if state.auto_scrape_batch_id == batch_id:
-            state.auto_scrape_batch_id = None
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -765,23 +700,6 @@ async def auto_scrape_all(
     # finally block, so without this it would show "running" forever and
     # never free up capacity for new runs.
     _sweep_stale_tasks(db)
-
-    # A batch can legitimately take many hours across 50+ keywords. If the
-    # external trigger fires again before the previous batch (and its Smart
-    # Brain analysis) has finished, don't start a second overlapping batch —
-    # that's what was causing scrapers to look "stuck running" (a newer
-    # batch's task for the same scraper masking an older, already-finished
-    # one) and piling up resource contention that made things slower still.
-    if state.auto_scrape_batch_id is not None:
-        logger.info(
-            "Auto-scrape webhook: batch %s is still in progress — skipping this trigger",
-            state.auto_scrape_batch_id[:8],
-        )
-        return {
-            "status":           "skipped",
-            "message":          "A previous auto-scrape batch is still running. This trigger was skipped so it doesn't overlap.",
-            "active_batch_id":  state.auto_scrape_batch_id,
-        }
 
     max_items = 50
 
@@ -1018,9 +936,6 @@ async def auto_scrape_all(
         raise HTTPException(400, "No keywords selected for any scraper. Please select keywords on the Scraping page first.")
 
     # ── Launch Parallel Smart Brain coordinator ───────────────────────────────
-    # Set before dispatch (not inside the background task) so a second
-    # webhook call arriving moments later reliably sees the guard.
-    state.auto_scrape_batch_id = batch_id
     background_tasks.add_task(_run_all_auto_scrape_parallel, task_specs, batch_id)
 
     scrapers_active = len({

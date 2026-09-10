@@ -86,7 +86,7 @@ def build_adaptive_card(job_id: str, keyword: str, article_count: int, articles:
             "items": [
                 {
                     "type": "TextBlock",
-                    "text": f"📰 Google News Alert: {keyword.title()}",
+                    "text": "📰 Google News Alert",
                     "weight": "Bolder",
                     "size": "Large",
                     "wrap": True,
@@ -94,7 +94,7 @@ def build_adaptive_card(job_id: str, keyword: str, article_count: int, articles:
                 {
                     "type": "TextBlock",
                     "text": (
-                        f"**{article_count} articles found** — "
+                        f"**{article_count} articles found** across selected keywords — "
                         f"tick the ones you want saved, then click **Save Selected**.\n\n"
                         f"Job ID: `{job_id[:8]}…`"
                     ),
@@ -114,74 +114,102 @@ def build_adaptive_card(job_id: str, keyword: str, article_count: int, articles:
         },
     ]
 
-    # ── One ToggleInput per article (checkbox) ────────────────────────────────
-    # We index from 0 to match the original articles list order.
-    # The toggle id is  selected_<index>  and value when checked is "true".
-    display_articles = articles[:25]  # Teams card size limit — adjust as needed
+    # ── Group articles by keyword (up to 30 articles) ─────────────────────────
+    display_articles = articles[:30]
 
-    for i, article in enumerate(display_articles):
-        title = (article.get("title") or "").strip() or f"Article {i + 1}"
-        source = (article.get("source_name") or article.get("source") or "").strip()
-        url = (article.get("google_news_url") or article.get("url") or article.get("link") or "").strip()
-        published = (article.get("published_at") or article.get("publishedAt") or "").strip()
+    from collections import OrderedDict
+    grouped: OrderedDict[str, list[tuple[int, dict]]] = OrderedDict()
 
-        # Build the label shown next to the checkbox
-        meta_parts: list[str] = []
-        if source and source.lower() not in _NULL_VALUES:
-            meta_parts.append(source)
-        if published:
-            try:
-                dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
-                meta_parts.append(dt.strftime("%d %b %Y"))
-            except Exception:
-                meta_parts.append(published[:10])
+    for idx, article in enumerate(display_articles):
+        kw = (
+            article.get("keyword")
+            or article.get("search_query")
+            or (keyword.split(",")[0] if keyword else "General")
+        ).strip()
+        if kw not in grouped:
+            grouped[kw] = []
+        grouped[kw].append((idx, article))
 
-        meta_line = " · ".join(meta_parts)
-
-        # Container for one article row
-        article_body: list[dict] = [
-            {
-                "type": "Input.Toggle",
-                "id": f"selected_{i}",           # <<< Power Automate reads this key
-                "title": f"**{i + 1}. {title}**",
-                "value": "false",                 # unchecked by default
-                "valueOn": "true",
-                "valueOff": "false",
-                "wrap": True,
-            },
-        ]
-
-        if meta_line:
-            article_body.append({
-                "type": "TextBlock",
-                "text": meta_line,
-                "isSubtle": True,
-                "size": "Small",
-                "spacing": "None",
-                "wrap": True,
-            })
-
-        if url:
-            article_body.append({
-                "type": "TextBlock",
-                "text": f"[Read more]({url})",
-                "isSubtle": True,
-                "size": "Small",
-                "spacing": "None",
-                "wrap": True,
-            })
-
+    # Render each keyword section with articles listed beneath it
+    for kw_idx, (kw_name, kw_articles) in enumerate(grouped.items(), 1):
+        # Section Heading for Keyword
         body.append({
             "type": "Container",
+            "style": "emphasis",
             "spacing": "Medium",
-            "separator": i == 0,   # separator before first article only
-            "items": article_body,
+            "separator": True,
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": f"📂 **{kw_idx}. {kw_name.title()}** ({len(kw_articles)} posts)",
+                    "weight": "Bolder",
+                    "size": "Medium",
+                    "wrap": True,
+                },
+            ],
         })
 
-    if len(articles) > 25:
+        # Render individual article checkboxes under this keyword
+        for post_num, (global_i, article) in enumerate(kw_articles, 1):
+            title = (article.get("title") or "").strip() or f"Article {global_i + 1}"
+            source = (article.get("source_name") or article.get("source") or "").strip()
+            url = (article.get("google_news_url") or article.get("url") or article.get("link") or "").strip()
+            published = (article.get("published_at") or article.get("publishedAt") or "").strip()
+
+            meta_parts: list[str] = []
+            if source and source.lower() not in _NULL_VALUES:
+                meta_parts.append(source)
+            if published:
+                try:
+                    dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
+                    meta_parts.append(dt.strftime("%d %b %Y"))
+                except Exception:
+                    meta_parts.append(published[:10])
+
+            meta_line = " · ".join(meta_parts)
+
+            article_body: list[dict] = [
+                {
+                    "type": "Input.Toggle",
+                    "id": f"selected_{global_i}",
+                    "title": f"**{post_num}. {title}**",
+                    "value": "false",
+                    "valueOn": "true",
+                    "valueOff": "false",
+                    "wrap": True,
+                },
+            ]
+
+            if meta_line:
+                article_body.append({
+                    "type": "TextBlock",
+                    "text": meta_line,
+                    "isSubtle": True,
+                    "size": "Small",
+                    "spacing": "None",
+                    "wrap": True,
+                })
+
+            if url:
+                article_body.append({
+                    "type": "TextBlock",
+                    "text": f"[Read article]({url})",
+                    "isSubtle": True,
+                    "size": "Small",
+                    "spacing": "None",
+                    "wrap": True,
+                })
+
+            body.append({
+                "type": "Container",
+                "spacing": "Small",
+                "items": article_body,
+            })
+
+    if len(articles) > 30:
         body.append({
             "type": "TextBlock",
-            "text": f"⚠️ Only the first 25 articles are shown due to card size limits.",
+            "text": "⚠️ Display capped at 30 articles due to card size limits.",
             "isSubtle": True,
             "wrap": True,
             "color": "Warning",
@@ -616,7 +644,7 @@ Write a newsletter body in exactly 4 paragraphs, totaling 250-300 words:
 
 Paragraph1 (Hook): Introduce the problem or finding from the article in a relatable, engaging way. Make the reader feel the urgency. 2-3 sentences.
 
-Paragraph2 (Stats): Cite a specific source with concrete statistics. Format: "According to [Source Name], who [credibility statement], [statistic]..." Include one key statistic that should be highlighted in red. 2-3 sentences.
+Paragraph2 (Stats): Cite a specific source with concrete statistics. Format: "According to [Source Name], who [credibility statement], [statistic]..." Include one key statistic that should be highlighted in red (plain text only, DO NOT output any HTML tags). 2-3 sentences.
 
 Paragraph3 (Context): Connect the article's topic to current trends — AI adoption, Microsoft Copilot, compliance regulations, data security, or cloud governance. Show why this matters NOW. 2-3 sentences.
 
@@ -626,7 +654,7 @@ Also generate:
 - A short CTA button label (e.g. "👉Schedule a discovery call")
 - A brief image prompt describing a professional, abstract illustration for this topic (for DALL-E generation). The prompt should describe a clean, corporate, modern illustration — NO text, NO logos, NO words in the image. Focus on visual metaphors (shields, clouds, data flows, locks, networks). Style: flat design, blue/teal color palette.
 
-Return ONLY valid JSON — no markdown, no code fences, nothing outside the JSON:
+Return ONLY valid JSON — no markdown, no HTML tags (no <span>, no <style>, no <font>, no <b>), no code fences:
 {
   "hook_paragraph": "2-3 sentences introducing the problem",
   "stat_paragraph": "2-3 sentences with source citation and statistics",
@@ -1047,6 +1075,11 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
             "image_prompt": f"A professional abstract illustration about {keyword}",
         }
 
+    # Auto-sanitize all text fields to guarantee zero raw HTML tags
+    for key in ("hook_paragraph", "stat_paragraph", "context_paragraph", "solution_paragraph", "highlight_stat", "full_text"):
+        if key in content_parsed and isinstance(content_parsed[key], str):
+            content_parsed[key] = re.sub(r"<[^>]+>", "", content_parsed[key]).strip()
+
     # Generate hero image via DALL-E
     image_prompt = content_parsed.get("image_prompt", "")
     image_data = _generate_newsletter_image(image_prompt, api_key)
@@ -1076,9 +1109,27 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
     )
     db.add(newsletter)
     db.commit()
+    try:
+        db.refresh(newsletter)
+    except Exception:
+        pass
+
+    nl_id = newsletter.id
+    if not nl_id:
+        try:
+            row = (
+                db.query(GeneratedNewsletter)
+                .filter_by(job_id=job_id, title=title)
+                .order_by(GeneratedNewsletter.created_at.desc())
+                .first()
+            )
+            if row:
+                nl_id = row.id
+        except Exception:
+            pass
 
     return {
-        "id": newsletter.id,
+        "id": nl_id,
         "title": newsletter.title,
         "article_date": newsletter.article_date,
         "article_count": newsletter.article_count,

@@ -150,6 +150,7 @@ def _normalise(raw: dict, global_pos: int, keyword: str, scraped_at: str) -> dic
         "related_stories": stories,
         "related_count":   len(stories),
         "search_query":    keyword,   # db_writer field
+        "keyword":         keyword,   # explicit keyword for Adaptive Card grouping
         "scraped_at":      scraped_at,
     }
 

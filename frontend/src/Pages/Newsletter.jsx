@@ -57,28 +57,32 @@ const PROVIDER_COLORS = {
   gemini:    "#4285f4",
 };
 
+const stripHtml = (s) => (s ? String(s).replace(/<[^>]+>/g, "").trim() : "");
+
 // ── Build Mailchimp-compatible inline-styled HTML for Gmail paste ──────────────
 function buildGmailHtml(newsletter) {
   const c        = newsletter?.content || {};
-  const hook     = String(c.hook_paragraph || "");
-  const stat     = String(c.stat_paragraph || "");
-  const source   = String(c.source_name || "");
+  const hook     = stripHtml(c.hook_paragraph || "");
+  const stat     = stripHtml(c.stat_paragraph || "");
+  const source   = stripHtml(c.source_name || "");
   const sourceUrl= String(c.source_url || "#");
-  const highlight= String(c.highlight_stat || "");
-  const context  = String(c.context_paragraph || "");
-  const solution = String(c.solution_paragraph || "");
+  const highlight= stripHtml(c.highlight_stat || "");
+  const context  = stripHtml(c.context_paragraph || "");
+  const solution = stripHtml(c.solution_paragraph || "");
   const ctaLabel = String(c.cta_label || "👉Schedule a discovery call");
   const imageData= String(c.image_data || "");
 
   const esc = (s) => s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  // Replace **stat** in stat_paragraph with red-highlighted version
+  // Replace stat in stat_paragraph with red-highlighted version
   const highlightStat = (text, stat) => {
-    if (!stat) return `<span style="font-size:18px">${esc(text)}</span>`;
-    const escaped = stat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = text.split(new RegExp(`(${escaped})`, 'i'));
+    const cleanText = stripHtml(text);
+    const cleanStat = stripHtml(stat);
+    if (!cleanStat) return `<span style="font-size:18px">${esc(cleanText)}</span>`;
+    const escaped = cleanStat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = cleanText.split(new RegExp(`(${escaped})`, 'i'));
     return parts.map(p => {
-      if (p.toLowerCase() === stat.toLowerCase()) {
+      if (p.toLowerCase() === cleanStat.toLowerCase()) {
         return `<span style="color:#B22222;font-weight:bold;">${esc(p)}</span>`;
       }
       return `<span style="font-size:18px">${esc(p)}</span>`;
@@ -371,18 +375,18 @@ const RenderedNewsletter = ({
 
   // Extract full continuous text
   const getFullText = () => {
-    if (c.full_text != null && c.full_text !== "") return c.full_text;
+    if (c.full_text != null && c.full_text !== "") return stripHtml(c.full_text);
     const parts = [
-      c.hook_paragraph,
-      c.stat_paragraph,
-      c.context_paragraph,
-      c.solution_paragraph,
+      stripHtml(c.hook_paragraph),
+      stripHtml(c.stat_paragraph),
+      stripHtml(c.context_paragraph),
+      stripHtml(c.solution_paragraph),
     ].filter(Boolean);
     return parts.join("\n\n");
   };
 
   const fullText = getFullText();
-  const highlight = c.highlight_stat || "";
+  const highlight = stripHtml(c.highlight_stat || "");
   const ctaLabel  = c.cta_label || "👉 Schedule a discovery call";
   const imageData = c.image_data || "";
 
@@ -393,10 +397,12 @@ const RenderedNewsletter = ({
 
   // Highlight stat in red within text
   const renderStatWithHighlight = (text, stat) => {
-    if (!stat) return text;
-    const parts = text.split(new RegExp(`(${stat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i'));
+    const cleanText = stripHtml(text);
+    const cleanStat = stripHtml(stat);
+    if (!cleanStat) return cleanText;
+    const parts = cleanText.split(new RegExp(`(${cleanStat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i'));
     return parts.map((p, i) =>
-      p.toLowerCase() === stat.toLowerCase()
+      p.toLowerCase() === cleanStat.toLowerCase()
         ? <Box key={i} component="span" sx={{ color: "#B22222", fontWeight: "bold" }}>{p}</Box>
         : p
     );
@@ -1173,22 +1179,49 @@ const Newsletter = () => {
   // Deep-link from Teams Adaptive Card (e.g. /newsletters?id=123&edit=true)
   const initialDeepLinkHandled = React.useRef(false);
   useEffect(() => {
-    if (newsletters.length === 0 || initialDeepLinkHandled.current) return;
+    if (initialDeepLinkHandled.current) return;
+
     try {
       const params = new URLSearchParams(window.location.search);
-      const targetId = parseInt(params.get("id"), 10);
+      const idParam = params.get("id");
       const shouldEdit = params.get("edit") === "true";
-      if (targetId && !isNaN(targetId)) {
-        const targetNl = newsletters.find((n) => n.id === targetId);
-        if (targetNl) {
-          initialDeepLinkHandled.current = true;
-          setSelected(targetNl);
-          setEditedTitle(targetNl.title || "");
-          setEditedContent(targetNl.content || {});
-          if (shouldEdit) {
-            setIsLiveEditing(true);
-          }
+
+      if (!idParam) return;
+
+      const targetId = parseInt(idParam, 10);
+
+      const applySelection = (nl) => {
+        initialDeepLinkHandled.current = true;
+        setSelected(nl);
+        setEditedTitle(nl.title || "");
+        setEditedContent(nl.content || {});
+        if (shouldEdit) {
+          setIsLiveEditing(true);
         }
+      };
+
+      // 1. Try finding in already fetched list
+      if (newsletters.length > 0) {
+        const found = newsletters.find(
+          (n) => n.id === targetId || String(n.id) === idParam || n.job_id === idParam
+        );
+        if (found) {
+          applySelection(found);
+          return;
+        }
+      }
+
+      // 2. Direct fallback API fetch if not found in list or list still loading
+      if (targetId && !isNaN(targetId)) {
+        apiFetch(`${API_BASE}/api/newsletters/${targetId}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((nl) => {
+            if (nl && nl.id) {
+              setNewsletters((prev) => (prev.some((n) => n.id === nl.id) ? prev : [nl, ...prev]));
+              applySelection(nl);
+            }
+          })
+          .catch((err) => console.warn("Failed to fetch deep-linked newsletter:", err));
       }
     } catch (e) {
       console.warn("Deep-link param parse error:", e);
