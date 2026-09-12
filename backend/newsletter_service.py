@@ -925,6 +925,11 @@ def process_webhook_response(db, job_id: str, approved: bool,
 
     except Exception as exc:
         logger.error("Job %s processing failed: %s", job_id, exc)
+        # If the exception came from a failed flush/commit above, the session
+        # is left in "rolled back" state and refuses any further use until
+        # explicitly rolled back — without this, marking the job failed below
+        # raises its own error and the job is left stuck instead of "failed".
+        db.rollback()
         job.status = "failed"
         job.error = str(exc)
         db.commit()

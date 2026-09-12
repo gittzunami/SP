@@ -90,8 +90,11 @@ def _get_column_type(col):
     if isinstance(t, Integer):    return "INTEGER"
     if isinstance(t, Float):      return "DOUBLE PRECISION"
     if isinstance(t, Boolean):    return "BOOLEAN"
-    if isinstance(t, String):     return f"VARCHAR({t.length or 255})"
+    # Text must be checked before String — Text is a subclass of String in
+    # SQLAlchemy, and has no .length, so checking String first would wrongly
+    # collapse every Text column to VARCHAR(255) here.
     if isinstance(t, Text):       return "TEXT"
+    if isinstance(t, String):     return f"VARCHAR({t.length or 255})"
     if isinstance(t, DateTime):   return "TIMESTAMP WITH TIME ZONE"
     return "TEXT"
 
