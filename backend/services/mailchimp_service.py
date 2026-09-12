@@ -445,8 +445,17 @@ def create_and_send_campaign(
     except Exception:
         content_dict = {}
 
-    campaign_subject = subject or row.title or "TrendSense Industry Digest"
-    snippet = preview_text or str(content_dict.get("hook_paragraph") or "")[:120]
+    campaign_subject = (
+        (subject or "").strip()
+        or str(content_dict.get("email_subject_line") or "").strip()
+        or (row.title or "").strip()
+        or "TrendSense Industry Digest"
+    )
+    snippet = (
+        (preview_text or "").strip()
+        or str(content_dict.get("preview_text") or "").strip()
+        or str(content_dict.get("hook_paragraph") or "")[:120].strip()
+    )
 
     session = _get_auth_session(key)
 
@@ -458,7 +467,7 @@ def create_and_send_campaign(
         "settings": {
             "subject_line": campaign_subject,
             "preview_text": snippet,
-            "title": f"TrendSense: {row.title[:80]}",
+            "title": f"TrendSense: {campaign_subject[:80]}",
             "from_name": sender_name,
             "reply_to": sender_email,
             "authenticate": True,

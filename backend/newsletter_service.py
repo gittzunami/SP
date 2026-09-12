@@ -464,7 +464,7 @@ def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = 
         "wrap": True,
     })
 
-    edit_url = f"{f_url}/newsletters?id={nl_id}&edit=true"
+    edit_url = f"{f_url}/newsletter?id={nl_id}&edit=true"
 
     actions = [
         {
@@ -652,11 +652,15 @@ Paragraph3 (Context): Connect the article's topic to current trends — AI adopt
 Paragraph4 (Solution): Introduce Tzunami as the solution. Position Tzunami as the platform that gives organizations visibility and control. Be authoritative but not salesy. 2-3 sentences.
 
 Also generate:
-- A short CTA button label (e.g. "👉Schedule a discovery call")
+- email_subject_line: A professional, engaging, high-converting email subject line (under 60 characters) strictly compliant with Mailchimp Acceptable Use and CAN-SPAM policies. AVOID ALL spam trigger words, panic/alarmist phrasing, ALL-CAPS, or clickbait (e.g. do NOT write 'URGENT', 'data breach confirmed', 'hacked', 'act now', 'alert'). Instead, frame the subject around industry insights, data governance, and strategic value (e.g. '[TrendSense] Identity Verification & Cloud Governance Trends').
+- preview_text: A compelling 1-sentence inbox preview snippet (under 100 characters) that complements the subject line.
+- A short CTA button label (e.g. "👉 Schedule a discovery call")
 - A brief image prompt describing a professional, abstract illustration for this topic (for DALL-E generation). The prompt should describe a clean, corporate, modern illustration — NO text, NO logos, NO words in the image. Focus on visual metaphors (shields, clouds, data flows, locks, networks). Style: flat design, blue/teal color palette.
 
 Return ONLY valid JSON — no markdown, no HTML tags (no <span>, no <style>, no <font>, no <b>), no code fences:
 {
+  "email_subject_line": "Professional, policy-safe email subject line (under 60 chars)",
+  "preview_text": "Engaging 1-sentence inbox preview text (under 100 chars)",
   "hook_paragraph": "2-3 sentences introducing the problem",
   "stat_paragraph": "2-3 sentences with source citation and statistics",
   "source_name": "Name of the source you cited",
@@ -1082,6 +1086,8 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
         content_parsed = json.loads(content)
     except json.JSONDecodeError:
         content_parsed = {
+            "email_subject_line": f"[TrendSense] {keyword.title()} Industry Digest",
+            "preview_text": f"Latest trends, security insights, and data governance updates regarding {keyword}.",
             "hook_paragraph": f"What's really happening with {keyword}?",
             "stat_paragraph": content[:300] if content else "",
             "source_name": article.get("source_name", ""),
@@ -1094,7 +1100,7 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
         }
 
     # Auto-sanitize all text fields to guarantee zero raw HTML tags
-    for key in ("hook_paragraph", "stat_paragraph", "context_paragraph", "solution_paragraph", "highlight_stat", "full_text"):
+    for key in ("email_subject_line", "preview_text", "hook_paragraph", "stat_paragraph", "context_paragraph", "solution_paragraph", "highlight_stat", "full_text"):
         if key in content_parsed and isinstance(content_parsed[key], str):
             content_parsed[key] = re.sub(r"<[^>]+>", "", content_parsed[key]).strip()
 
@@ -1111,8 +1117,8 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
         pass
 
     today = _now().strftime("%Y-%m-%d")
-    raw_title = article.get("title") or keyword or "Google News"
-    title = f"{raw_title[:60]} — {today}"
+    clean_subject = content_parsed.get("email_subject_line") or article.get("title") or keyword or "Google News"
+    title = f"{clean_subject[:80]} — {today}"
 
     newsletter = GeneratedNewsletter(
         job_id=job_id,

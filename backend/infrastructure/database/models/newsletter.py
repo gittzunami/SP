@@ -27,6 +27,7 @@ if DB_AVAILABLE:
         completed_at      = Column(DateTime(timezone=True), nullable=True)
         error             = Column(Text,        nullable=True)
         raw_articles_json = Column(Text,        nullable=True)
+        selected_articles_json = Column(Text,   nullable=True)
         created_at        = Column(DateTime(timezone=True), nullable=False)
 
     class GeneratedNewsletter(Base):
