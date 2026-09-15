@@ -8,6 +8,7 @@ import {
   Button, Dialog, DialogTitle, DialogContent, DialogActions,
   Snackbar, Alert, MenuItem, Select, InputLabel, FormControl,
   RadioGroup, FormControlLabel, Radio, Divider, Grid, TextareaAutosize,
+  Checkbox, ListItemText, OutlinedInput,
 } from "@mui/material";
 
 import ArticleIcon        from "@mui/icons-material/Article";
@@ -29,6 +30,11 @@ import BarChartIcon       from "@mui/icons-material/BarChart";
 import MarkEmailReadIcon  from "@mui/icons-material/MarkEmailRead";
 import AccessTimeIcon     from "@mui/icons-material/AccessTime";
 import SaveIcon           from "@mui/icons-material/Save";
+import LockIcon           from "@mui/icons-material/Lock";
+import PeopleIcon         from "@mui/icons-material/People";
+import AddIcon            from "@mui/icons-material/Add";
+import VisibilityIcon     from "@mui/icons-material/Visibility";
+import SearchIcon         from "@mui/icons-material/Search";
 import { useAppTheme }    from "../AppThemeContext";
 
 
@@ -37,7 +43,8 @@ import { useAppTheme }    from "../AppThemeContext";
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 // ── Static newsletter copy — Tzunami branding ────────────────────────────────
-const CTA_URL = "https://booking.cloudsfer.com/meetings/book-tzunami/cloudsfer-sales-discovery-?uuid=9c89c0bf-3626-47ed-831c-f5e2a8ce1380";
+const CTA_URL = "https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call";
+const CTA_LABEL = "👉 Schedule a discovery call";
 
 const SOCIAL_LINKS = [
   { name: "Facebook", url: "https://www.facebook.com/TzunamiDeployer?locale=he_IL", icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-facebook-48.png" },
@@ -69,8 +76,7 @@ function buildGmailHtml(newsletter) {
   const highlight= stripHtml(c.highlight_stat || "");
   const context  = stripHtml(c.context_paragraph || "");
   const solution = stripHtml(c.solution_paragraph || "");
-  const ctaLabel = String(c.cta_label || "👉Schedule a discovery call");
-  const imageData= String(c.image_data || "");
+  const ctaLabel = CTA_LABEL;
 
   const esc = (s) => s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -114,11 +120,6 @@ function buildGmailHtml(newsletter) {
       </table>
       <!--[if mso]></td><![endif]-->
     </td>`).join('');
-
-  // Image section (only if imageData exists)
-  const imageSection = imageData
-    ? `<p dir="ltr" style="color:#222222;margin:10px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;"><img src="data:image/png;base64,${imageData}" style="border:0;width:600px;height:auto;margin:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;" width="600"></p>`
-    : '';
 
   return `
 <!doctype html>
@@ -207,7 +208,6 @@ function buildGmailHtml(newsletter) {
                             <td valign="top" style="padding-top:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
                               <table align="left" border="0" cellpadding="0" cellspacing="0" style="max-width:100%;min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;" width="100%" class="mcnTextContentContainer">
                                 <tr>
-                                    ${imageSection}
                                     ${(() => {
                                       const ft = String(c.full_text || c.body_text || "").trim();
                                       if (ft) {
@@ -387,8 +387,6 @@ const RenderedNewsletter = ({
 
   const fullText = getFullText();
   const highlight = stripHtml(c.highlight_stat || "");
-  const ctaLabel  = c.cta_label || "👉 Schedule a discovery call";
-  const imageData = c.image_data || "";
 
   // Legacy format detection
   const question = c.question || c.headline || null;
@@ -419,15 +417,6 @@ const RenderedNewsletter = ({
         stat_paragraph: paras[1] || "",
         context_paragraph: paras[2] || "",
         solution_paragraph: paras[3] || (paras.slice(3).join("\n\n")),
-      });
-    }
-  };
-
-  const handleCtaChange = (e) => {
-    if (onContentChange) {
-      onContentChange({
-        ...c,
-        cta_label: e.target.value,
       });
     }
   };
@@ -509,18 +498,6 @@ const RenderedNewsletter = ({
       ) : (
         /* ── New Tzunami format ── */
         <>
-          {/* Hero Image */}
-          {imageData && (
-            <Box sx={{ mb: 2, textAlign: "center" }}>
-              <Box
-                component="img"
-                src={`data:image/png;base64,${imageData}`}
-                alt="Newsletter hero"
-                sx={{ width: "100%", maxHeight: 400, objectFit: "cover", borderRadius: 1 }}
-              />
-            </Box>
-          )}
-
           {/* Unified Newsletter Content: Single Continuous Document */}
           {isEditing ? (
             <Box sx={{ mb: 2 }}>
@@ -565,53 +542,27 @@ const RenderedNewsletter = ({
             </Box>
           )}
 
-          {/* CTA button — blue pill */}
+          {/* CTA button — blue pill (Hardcoded static link) */}
           <Box sx={{ textAlign: "center", mb: 2 }}>
-            {isEditing ? (
-              <Box sx={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 0.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontSize: "0.7rem" }}>
-                  Button Text:
-                </Typography>
-                <input
-                  type="text"
-                  value={ctaLabel}
-                  onChange={handleCtaChange}
-                  placeholder="Button Label..."
-                  style={{
-                    backgroundColor: "#2BAADF",
-                    color: "#ffffff",
-                    padding: "8px 24px",
-                    borderRadius: "50px",
-                    fontWeight: "bold",
-                    fontSize: "0.85rem",
-                    border: "2px dashed #ffffff",
-                    textAlign: "center",
-                    outline: "none",
-                    cursor: "text",
-                  }}
-                />
-              </Box>
-            ) : (
-              <Box
-                component="a"
-                href={CTA_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                sx={{
-                  display: "inline-block",
-                  bgcolor: "#2BAADF",
-                  color: "#ffffff",
-                  px: 3, py: 1,
-                  borderRadius: "50px",
-                  fontWeight: "bold",
-                  fontSize: "0.85rem",
-                  textDecoration: "none",
-                  "&:hover": { bgcolor: "#25a0c4" },
-                }}
-              >
-                {ctaLabel}
-              </Box>
-            )}
+            <Box
+              component="a"
+              href={CTA_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{
+                display: "inline-block",
+                bgcolor: "#2BAADF",
+                color: "#ffffff",
+                px: 3, py: 1,
+                borderRadius: "50px",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+                textDecoration: "none",
+                "&:hover": { bgcolor: "#25a0c4" },
+              }}
+            >
+              {CTA_LABEL}
+            </Box>
           </Box>
 
           {/* Social bar — blue (#31AFE2) with Mailchimp-style icons */}
@@ -667,6 +618,445 @@ const RenderedNewsletter = ({
 // ── Mailchimp Campaign Modal ──────────────────────────────────────────────────
 
 
+// ── Audience Management Modal (Manage Audience Name : ID mappings) ────────────
+const AudienceManagementModal = ({ open, onClose, onAudiencesUpdated, onInspectAudience, C }) => {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [audiences, setAudiences] = useState([]);
+  const [nameInput, setNameInput] = useState("");
+  const [idInput, setIdInput] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const loadAudiences = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const raw = await getPref("mailchimp_custom_audiences", "[]");
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        setAudiences(list);
+      }
+    } catch (err) {
+      console.error("Failed to load custom audiences:", err);
+      setError("Failed to load saved audiences.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      loadAudiences();
+      setError("");
+      setSuccess("");
+    }
+  }, [open, loadAudiences]);
+
+  const handleAddAudience = async () => {
+    setError("");
+    setSuccess("");
+    const name = nameInput.trim();
+    const id = idInput.trim();
+    if (!name) {
+      setError("Please enter an Audience Name (e.g. Audience1).");
+      return;
+    }
+    if (!id) {
+      setError("Please enter a valid Mailchimp Audience ID.");
+      return;
+    }
+    if (audiences.some((a) => a.id.toLowerCase() === id.toLowerCase())) {
+      setError(`Audience ID "${id}" is already in your list.`);
+      return;
+    }
+
+    const updated = [...audiences, { id, name }];
+    setSaving(true);
+    try {
+      await setPref("mailchimp_custom_audiences", JSON.stringify(updated));
+      setAudiences(updated);
+      setNameInput("");
+      setIdInput("");
+      setSuccess(`Audience "${name}" added successfully!`);
+      if (onAudiencesUpdated) onAudiencesUpdated(updated);
+    } catch (err) {
+      setError(err.message || "Failed to save audience.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteAudience = async (idToDelete) => {
+    const updated = audiences.filter((a) => a.id !== idToDelete);
+    setSaving(true);
+    try {
+      await setPref("mailchimp_custom_audiences", JSON.stringify(updated));
+      setAudiences(updated);
+      setSuccess("Audience removed.");
+      if (onAudiencesUpdated) onAudiencesUpdated(updated);
+    } catch (err) {
+      setError(err.message || "Failed to update audience list.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ bgcolor: C.card, color: C.text, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <PeopleIcon sx={{ color: "#3b82f6" }} />
+          <Typography variant="h6" sx={{ fontWeight: 700, fontSize: "1.05rem" }}>
+            Manage Mailchimp Audiences
+          </Typography>
+        </Box>
+        <IconButton size="small" onClick={onClose} sx={{ color: C.textMuted }}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent sx={{ bgcolor: C.card, pt: 2.5 }}>
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
+
+        <Typography variant="body2" sx={{ color: C.textMuted, fontSize: "0.82rem", mb: 2 }}>
+          Add your target audience names and their Mailchimp IDs (e.g. <code>Audience1 : d71a823b12</code>). These are saved in your database and appear as checkmarked options during campaign dispatch.
+        </Typography>
+
+        {/* Add New Audience Form */}
+        <Box sx={{ p: 2, bgcolor: C.cardInner, borderRadius: 2, border: `1px solid ${C.border}`, mb: 3 }}>
+          <Typography variant="subtitle2" sx={{ color: C.text, fontWeight: 700, mb: 1.5, fontSize: "0.85rem" }}>
+            Add New Audience
+          </Typography>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5, mb: 1.5 }}>
+            <TextField
+              size="small"
+              label="Audience Name"
+              placeholder="e.g. Audience1 or VIP Clients"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+            />
+            <TextField
+              size="small"
+              label="Audience / List ID"
+              placeholder="e.g. d71a823b12"
+              value={idInput}
+              onChange={(e) => setIdInput(e.target.value)}
+            />
+          </Box>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={handleAddAudience}
+            disabled={saving}
+            startIcon={<AddIcon />}
+            sx={{ bgcolor: "#3b82f6", textTransform: "none", fontWeight: 600, fontSize: "0.8rem" }}
+          >
+            Add Audience
+          </Button>
+        </Box>
+
+        {/* Saved Audiences List */}
+        <Typography variant="subtitle2" sx={{ color: C.text, fontWeight: 700, mb: 1.5, fontSize: "0.85rem" }}>
+          Configured Audiences ({audiences.length})
+        </Typography>
+
+        {loading ? (
+          <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
+            <CircularProgress size={24} sx={{ color: "#3b82f6" }} />
+          </Box>
+        ) : audiences.length === 0 ? (
+          <Box sx={{ p: 3, textAlign: "center", bgcolor: C.cardInner, borderRadius: 1.5, border: `1px dashed ${C.border}` }}>
+            <Typography variant="caption" sx={{ color: C.textMuted }}>
+              No custom audiences configured yet. Add your first audience above.
+            </Typography>
+          </Box>
+        ) : (
+          <Stack spacing={1} sx={{ maxHeight: 220, overflowY: "auto", pr: 0.5 }}>
+            {audiences.map((aud) => (
+              <Box
+                key={aud.id}
+                sx={{
+                  p: 1.5,
+                  bgcolor: C.cardInner,
+                  borderRadius: 1.5,
+                  border: `1px solid ${C.border}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Box>
+                  <Typography variant="body2" sx={{ color: C.text, fontWeight: 600, fontSize: "0.85rem" }}>
+                    {aud.name}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.75rem", fontFamily: "monospace" }}>
+                    ID: {aud.id}
+                  </Typography>
+                </Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <Tooltip title="View Contacts / Members">
+                    <IconButton
+                      size="small"
+                      onClick={() => onInspectAudience && onInspectAudience(aud)}
+                      sx={{ color: C.textMuted, "&:hover": { color: "#3b82f6" } }}
+                    >
+                      <VisibilityIcon sx={{ fontSize: 17 }} />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Delete Audience">
+                    <IconButton
+                      size="small"
+                      onClick={() => handleDeleteAudience(aud.id)}
+                      disabled={saving}
+                      sx={{ color: C.textMuted, "&:hover": { color: "#ef4444" } }}
+                    >
+                      <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              </Box>
+            ))}
+          </Stack>
+        )}
+      </DialogContent>
+
+      <DialogActions sx={{ bgcolor: C.card, px: 3, py: 2, borderTop: `1px solid ${C.border}` }}>
+        <Button onClick={onClose} variant="outlined" sx={{ color: C.text, borderColor: C.border, textTransform: "none" }}>
+          Done
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+
+// ── Audience Members / Contacts Inspector Modal ──────────────────────────────
+const AudienceMembersModal = ({ open, onClose, audience, C }) => {
+  const [loading, setLoading] = useState(true);
+  const [members, setMembers] = useState([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [error, setError] = useState("");
+  const [copiedEmail, setCopiedEmail] = useState("");
+
+  const loadMembers = useCallback(async () => {
+    if (!audience?.id) return;
+    setLoading(true);
+    setError("");
+    try {
+      const url = `${API_BASE}/api/mailchimp/audiences/${audience.id}/members?count=100${
+        statusFilter !== "all" ? `&status=${statusFilter}` : ""
+      }`;
+      const res = await apiFetch(url);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to load audience contacts.");
+      }
+      const data = await res.json();
+      setMembers(data.members || []);
+      setTotalItems(data.total_items || (data.members || []).length);
+    } catch (err) {
+      setError(err.message || "Failed to load audience contacts.");
+    } finally {
+      setLoading(false);
+    }
+  }, [audience?.id, statusFilter]);
+
+  useEffect(() => {
+    if (open && audience?.id) {
+      loadMembers();
+    }
+  }, [open, audience?.id, loadMembers]);
+
+  const handleCopy = (email) => {
+    navigator.clipboard.writeText(email);
+    setCopiedEmail(email);
+    setTimeout(() => setCopiedEmail(""), 2000);
+  };
+
+  const filteredMembers = members.filter((m) => {
+    const q = search.toLowerCase();
+    const email = (m.email_address || "").toLowerCase();
+    const name = (m.full_name || "").toLowerCase();
+    const tags = (m.tags || []).join(" ").toLowerCase();
+    return email.includes(q) || name.includes(q) || tags.includes(q);
+  });
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle
+        sx={{
+          bgcolor: C.card,
+          color: C.text,
+          borderBottom: `1px solid ${C.border}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          py: 2,
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          <PeopleIcon sx={{ color: "#3b82f6" }} />
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, fontSize: "1.05rem" }}>
+              {audience?.name || "Audience Contacts"}
+            </Typography>
+            <Typography variant="caption" sx={{ color: C.textMuted, fontFamily: "monospace" }}>
+              ID: {audience?.id} • Total Contacts: {totalItems}
+            </Typography>
+          </Box>
+        </Box>
+        <IconButton size="small" onClick={onClose} sx={{ color: C.textMuted }}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent sx={{ bgcolor: C.card, pt: 2.5, minHeight: 360 }}>
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+        {/* Search & Filter Controls */}
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5, mb: 2.5, alignItems: "center", justifyContent: "space-between" }}>
+          <TextField
+            size="small"
+            placeholder="Search email, name or tags..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            sx={{ minWidth: 260, flex: 1 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: C.textMuted, fontSize: 18 }} />
+                </InputAdornment>
+              ),
+            }}
+          />
+
+          <Stack direction="row" spacing={0.8}>
+            {["all", "subscribed", "unsubscribed", "cleaned"].map((st) => (
+              <Chip
+                key={st}
+                label={st.charAt(0).toUpperCase() + st.slice(1)}
+                size="small"
+                clickable
+                onClick={() => setStatusFilter(st)}
+                sx={{
+                  fontWeight: 600,
+                  fontSize: "0.75rem",
+                  bgcolor: statusFilter === st ? "#3b82f6" : C.cardInner,
+                  color: statusFilter === st ? "#fff" : C.textMuted,
+                  border: `1px solid ${statusFilter === st ? "#3b82f6" : C.border}`,
+                  "&:hover": {
+                    bgcolor: statusFilter === st ? "#2563eb" : C.card,
+                  },
+                }}
+              />
+            ))}
+          </Stack>
+        </Box>
+
+        {loading ? (
+          <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", py: 8, gap: 1.5 }}>
+            <CircularProgress size={32} sx={{ color: "#3b82f6" }} />
+            <Typography variant="body2" sx={{ color: C.textMuted }}>
+              Loading subscriber contacts from Mailchimp...
+            </Typography>
+          </Box>
+        ) : filteredMembers.length === 0 ? (
+          <Box sx={{ p: 4, textAlign: "center", bgcolor: C.cardInner, borderRadius: 2, border: `1px dashed ${C.border}` }}>
+            <PeopleIcon sx={{ fontSize: 36, color: C.textMuted, mb: 1, opacity: 0.6 }} />
+            <Typography variant="body2" sx={{ color: C.text, fontWeight: 600, mb: 0.5 }}>
+              No contacts found
+            </Typography>
+            <Typography variant="caption" sx={{ color: C.textMuted }}>
+              {search ? "No subscribers match your search filter." : "This audience list currently has no contacts."}
+            </Typography>
+          </Box>
+        ) : (
+          <Stack spacing={1} sx={{ maxHeight: 380, overflowY: "auto", pr: 0.5 }}>
+            {filteredMembers.map((m) => {
+              const isSubscribed = m.status === "subscribed";
+              const isUnsub = m.status === "unsubscribed";
+              return (
+                <Box
+                  key={m.id || m.email_address}
+                  sx={{
+                    p: 1.5,
+                    bgcolor: C.cardInner,
+                    borderRadius: 1.5,
+                    border: `1px solid ${C.border}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: 1.5,
+                  }}
+                >
+                  <Box sx={{ minWidth: 220, flex: 1 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <Typography variant="body2" sx={{ color: C.text, fontWeight: 700, fontSize: "0.85rem" }}>
+                        {m.email_address}
+                      </Typography>
+                      <Tooltip title={copiedEmail === m.email_address ? "Copied!" : "Copy Email"}>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleCopy(m.email_address)}
+                          sx={{ p: 0.2, color: copiedEmail === m.email_address ? "#22c55e" : C.textMuted }}
+                        >
+                          {copiedEmail === m.email_address ? <CheckIcon sx={{ fontSize: 13 }} /> : <ContentCopyIcon sx={{ fontSize: 13 }} />}
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                    <Typography variant="caption" sx={{ color: C.textMuted, fontSize: "0.75rem" }}>
+                      {m.full_name ? m.full_name : "No name provided"}
+                      {m.opt_in_time ? ` • Joined ${new Date(m.opt_in_time).toLocaleDateString()}` : ""}
+                    </Typography>
+                  </Box>
+
+                  {/* Tags */}
+                  {Array.isArray(m.tags) && m.tags.length > 0 && (
+                    <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", maxWidth: 200 }}>
+                      {m.tags.slice(0, 3).map((tag) => (
+                        <Chip key={tag} label={tag} size="small" sx={{ fontSize: "0.68rem", height: 20, bgcolor: C.card, color: C.textMuted, border: `1px solid ${C.border}` }} />
+                      ))}
+                      {m.tags.length > 3 && (
+                        <Chip label={`+${m.tags.length - 3}`} size="small" sx={{ fontSize: "0.68rem", height: 20, bgcolor: C.card, color: C.textMuted }} />
+                      )}
+                    </Box>
+                  )}
+
+                  {/* Status Badge */}
+                  <Chip
+                    label={m.status || "Unknown"}
+                    size="small"
+                    sx={{
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      bgcolor: isSubscribed ? "rgba(34, 197, 94, 0.12)" : isUnsub ? "rgba(239, 68, 68, 0.12)" : C.card,
+                      color: isSubscribed ? "#22c55e" : isUnsub ? "#ef4444" : C.textMuted,
+                      border: `1px solid ${isSubscribed ? "rgba(34, 197, 94, 0.3)" : isUnsub ? "rgba(239, 68, 68, 0.3)" : C.border}`,
+                    }}
+                  />
+                </Box>
+              );
+            })}
+          </Stack>
+        )}
+      </DialogContent>
+
+      <DialogActions sx={{ bgcolor: C.card, px: 3, py: 1.5, borderTop: `1px solid ${C.border}` }}>
+        <Button onClick={onClose} variant="outlined" sx={{ color: C.text, borderColor: C.border, textTransform: "none" }}>
+          Close
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+
 // ── Mailchimp Campaign Modal (Dedicated Send or Draft) ────────────────────────
 const MailchimpCampaignModal = ({ open, onClose, newsletter, mode = "send", onCampaignSent, C }) => {
   const isDraftMode = mode === "draft";
@@ -676,7 +1066,7 @@ const MailchimpCampaignModal = ({ open, onClose, newsletter, mode = "send", onCa
   const [audiences, setAudiences] = useState([]);
   const [subject, setSubject] = useState("");
   const [previewText, setPreviewText] = useState("");
-  const [audienceId, setAudienceId] = useState("");
+  const [selectedAudienceIds, setSelectedAudienceIds] = useState([]);
   const [fromName, setFromName] = useState("");
   const [fromEmail, setFromEmail] = useState("");
   const [error, setError] = useState("");
@@ -703,26 +1093,50 @@ const MailchimpCampaignModal = ({ open, onClose, newsletter, mode = "send", onCa
     const loadData = async () => {
       setLoading(true);
       try {
-        const [cfgRes, audRes] = await Promise.all([
+        const [cfgRes, audRes, dbAudRaw] = await Promise.all([
           apiFetch(`${API_BASE}/api/mailchimp/config`),
           apiFetch(`${API_BASE}/api/mailchimp/audiences`),
+          getPref("mailchimp_custom_audiences", "[]"),
         ]);
 
+        const audMap = new Map();
+
+        // 1. Load from DB UserPreferences
+        try {
+          const customList = JSON.parse(dbAudRaw);
+          if (Array.isArray(customList)) {
+            customList.forEach((a) => {
+              if (a && a.id) audMap.set(String(a.id), { id: String(a.id), name: a.name || a.id });
+            });
+          }
+        } catch {}
+
+        // 2. Load from API config
         if (cfgRes.ok) {
           const cfg = await cfgRes.json();
           setConfig(cfg);
           setFromName(cfg.default_from_name || "TrendSense Newsletter");
           setFromEmail(cfg.default_from_email || "");
-          if (cfg.default_audience_id) setAudienceId(cfg.default_audience_id);
+          if (Array.isArray(cfg.custom_audiences)) {
+            cfg.custom_audiences.forEach((a) => {
+              if (a && a.id) audMap.set(String(a.id), { id: String(a.id), name: a.name || a.id });
+            });
+          }
         }
 
+        // 3. Load from Mailchimp live audiences
         if (audRes.ok) {
           const audData = await audRes.json();
           const list = audData.audiences || [];
-          setAudiences(list);
-          if (list.length > 0) {
-            setAudienceId((prev) => prev || list[0].id);
-          }
+          list.forEach((a) => {
+            if (a && a.id) audMap.set(String(a.id), { ...a, id: String(a.id), name: a.name || a.id });
+          });
+        }
+
+        const merged = Array.from(audMap.values());
+        setAudiences(merged);
+        if (merged.length > 0) {
+          setSelectedAudienceIds((prev) => (prev && prev.length > 0 ? prev : [merged[0].id]));
         }
       } catch (err) {
         console.error("Failed to load Mailchimp data:", err);
@@ -739,8 +1153,8 @@ const MailchimpCampaignModal = ({ open, onClose, newsletter, mode = "send", onCa
       setError("Please enter a campaign subject line.");
       return;
     }
-    if (!audienceId) {
-      setError("Please select an Audience list.");
+    if (!selectedAudienceIds || selectedAudienceIds.length === 0) {
+      setError("Please select at least one Target Audience list.");
       return;
     }
     if (!fromEmail.trim()) {
@@ -757,7 +1171,8 @@ const MailchimpCampaignModal = ({ open, onClose, newsletter, mode = "send", onCa
       const payload = {
         subject,
         preview_text: previewText,
-        audience_id: audienceId,
+        audience_ids: selectedAudienceIds,
+        audience_id: selectedAudienceIds.join(","),
         from_name: fromName,
         from_email: fromEmail,
       };
@@ -829,13 +1244,13 @@ const MailchimpCampaignModal = ({ open, onClose, newsletter, mode = "send", onCa
             {isDraftMode ? (
               <Box sx={{ p: 1.5, bgcolor: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.25)", borderRadius: 1.5 }}>
                 <Typography variant="caption" sx={{ color: "#f59e0b", fontWeight: 600, display: "block" }}>
-                  📁 Creates an editable campaign draft in your Mailchimp account without broadcasting to subscribers.
+                  📁 Creates an editable campaign draft in your Mailchimp account for each selected audience without broadcasting.
                 </Typography>
               </Box>
             ) : (
               <Box sx={{ p: 1.5, bgcolor: "rgba(59, 130, 246, 0.08)", border: "1px solid rgba(59, 130, 246, 0.25)", borderRadius: 1.5 }}>
                 <Typography variant="caption" sx={{ color: "#3b82f6", fontWeight: 600, display: "block" }}>
-                  🚀 Broadcasts this newsletter immediately to all active subscribers in the selected audience.
+                  🚀 Broadcasts this newsletter immediately to all active subscribers across each selected audience.
                 </Typography>
               </Box>
             )}
@@ -859,20 +1274,60 @@ const MailchimpCampaignModal = ({ open, onClose, newsletter, mode = "send", onCa
             />
 
             <FormControl fullWidth size="small">
-              <InputLabel>Target Audience List</InputLabel>
+              <InputLabel id="target-audience-label">Target Audience Lists (Check single or multiple)</InputLabel>
               <Select
-                value={audienceId}
-                label="Target Audience List"
-                onChange={(e) => setAudienceId(e.target.value)}
+                labelId="target-audience-label"
+                multiple
+                value={selectedAudienceIds}
+                onChange={(e) => {
+                  const val = typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value;
+                  setSelectedAudienceIds(val);
+                }}
+                input={<OutlinedInput label="Target Audience Lists (Check single or multiple)" />}
+                renderValue={(selectedIds) => {
+                  if (!selectedIds || selectedIds.length === 0) return <em>Select target audience(s)...</em>;
+                  return (
+                    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                      {selectedIds.map((id) => {
+                        const match = audiences.find((a) => String(a.id) === String(id));
+                        return (
+                          <Chip
+                            key={id}
+                            label={match ? `${match.name} (${id})` : id}
+                            size="small"
+                            sx={{
+                              height: 22,
+                              fontSize: "0.72rem",
+                              bgcolor: "rgba(59, 130, 246, 0.15)",
+                              color: C.text,
+                              borderColor: "#3b82f6",
+                              border: "1px solid",
+                            }}
+                          />
+                        );
+                      })}
+                    </Box>
+                  );
+                }}
               >
                 {audiences.map((aud) => (
                   <MenuItem key={aud.id} value={aud.id}>
-                    {aud.name} ({aud.member_count} subscribers)
+                    <Checkbox
+                      checked={selectedAudienceIds.indexOf(aud.id) > -1}
+                      size="small"
+                      sx={{ p: 0.5, mr: 1, color: "#3b82f6", "&.Mui-checked": { color: "#3b82f6" } }}
+                    />
+                    <ListItemText
+                      primary={aud.name}
+                      secondary={`ID: ${aud.id}${aud.member_count !== undefined ? ` · ${aud.member_count} subscribers` : ""}`}
+                      primaryTypographyProps={{ fontSize: "0.85rem", fontWeight: 600, color: C.text }}
+                      secondaryTypographyProps={{ fontSize: "0.72rem", color: C.textMuted }}
+                    />
                   </MenuItem>
                 ))}
                 {audiences.length === 0 && (
-                  <MenuItem value={audienceId || "default"}>
-                    {audienceId ? `Audience ID: ${audienceId}` : "Default Audience"}
+                  <MenuItem disabled value="">
+                    <em>No audiences found. Please add an audience in Manage Audiences.</em>
                   </MenuItem>
                 )}
               </Select>
@@ -919,14 +1374,19 @@ const MailchimpCampaignModal = ({ open, onClose, newsletter, mode = "send", onCa
               bgcolor: isDraftMode ? "#f59e0b" : "#2baadf",
               color: isDraftMode ? "#000000" : "#ffffff",
               fontWeight: 700,
+              textTransform: "none",
               "&:hover": {
-                bgcolor: isDraftMode ? "#d97706" : "#238cb8",
+                bgcolor: isDraftMode ? "#d97706" : "#2290be",
               },
             }}
           >
             {sending
-              ? isDraftMode ? "Saving Draft..." : "Sending..."
-              : isDraftMode ? "Save Draft in Mailchimp" : "Send Campaign Now"}
+              ? isDraftMode
+                ? "Creating Draft(s)..."
+                : "Broadcasting..."
+              : isDraftMode
+              ? `Save Draft${selectedAudienceIds.length > 1 ? ` (${selectedAudienceIds.length} lists)` : ""}`
+              : `Send Campaign${selectedAudienceIds.length > 1 ? ` (${selectedAudienceIds.length} lists)` : ""}`}
           </Button>
         )}
       </DialogActions>
@@ -1174,9 +1634,11 @@ const Newsletter = () => {
   const [campaignModalOpen, setCampaignModalOpen] = useState(false);
   const [campaignModalMode, setCampaignModalMode] = useState("send"); // "send" | "draft"
   const [reportModalOpen,   setReportModalOpen]   = useState(false);
+  const [audienceModalOpen, setAudienceModalOpen] = useState(false);
+  const [inspectAudience,   setInspectAudience]   = useState(null);
   const [snack,             setSnack]             = useState({ open: false, msg: "", severity: "success" });
 
-  // Deep-link from Teams Adaptive Card (e.g. /newsletters?id=123&edit=true)
+  // Deep-link from Teams Adaptive Card (e.g. /newsletters?id=123&preview=true or &edit=true)
   const initialDeepLinkHandled = React.useRef(false);
   useEffect(() => {
     if (initialDeepLinkHandled.current) return;
@@ -1185,6 +1647,7 @@ const Newsletter = () => {
       const params = new URLSearchParams(window.location.search);
       const idParam = params.get("id");
       const shouldEdit = params.get("edit") === "true";
+      const isPreview = params.get("preview") === "true";
 
       if (!idParam) return;
 
@@ -1196,7 +1659,18 @@ const Newsletter = () => {
         setEditedTitle(nl.title || "");
         setEditedContent(nl.content || {});
         if (shouldEdit) {
-          setIsLiveEditing(true);
+          if (nl.mailchimp_status === "sent") {
+            setIsLiveEditing(false);
+            setSnack({
+              open: true,
+              msg: "This newsletter has already been broadcasted via Mailchimp and is locked in read-only mode to preserve campaign records.",
+              severity: "warning",
+            });
+          } else {
+            setIsLiveEditing(true);
+          }
+        } else if (isPreview) {
+          setIsLiveEditing(false);
         }
       };
 
@@ -1235,9 +1709,16 @@ const Newsletter = () => {
     }
   }, [selected?.id]);
 
-
   const handleToggleLiveEdit = () => {
     if (!selected) return;
+    if (selected.mailchimp_status === "sent") {
+      setSnack({
+        open: true,
+        msg: "Sent newsletters cannot be edited. Broadcast records are locked.",
+        severity: "warning",
+      });
+      return;
+    }
     if (!isLiveEditing) {
       setEditedTitle(selected.title || "");
       setEditedContent(selected.content || {});
@@ -1247,8 +1728,17 @@ const Newsletter = () => {
     }
   };
 
+
   const handleSaveLiveEdit = async () => {
     if (!selected) return;
+    if (selected.mailchimp_status === "sent") {
+      setSnack({
+        open: true,
+        msg: "Cannot save changes to a newsletter that was already sent.",
+        severity: "error",
+      });
+      return;
+    }
     setIsSavingLive(true);
     try {
       const res = await apiFetch(`${API_BASE}/api/newsletters/${selected.id}`, {
@@ -1312,11 +1802,27 @@ const Newsletter = () => {
   return (
     <Box sx={{ width: "100%", overflowX: "hidden" }}>
       {/* Header */}
-      <Box sx={{ mb: { xs: 3, md: 4 } }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: { xs: 3, md: 4 }, flexWrap: "wrap", gap: 1.5 }}>
         <Typography sx={{ fontWeight: "bold", color: C.text,
           fontSize: { xs: "1.2rem", sm: "1.4rem", md: "1.5rem" } }}>
           Newsletter
         </Typography>
+
+        <Button
+          variant="outlined"
+          startIcon={<PeopleIcon sx={{ fontSize: 16 }} />}
+          onClick={() => setAudienceModalOpen(true)}
+          sx={{
+            textTransform: "none",
+            fontSize: "0.82rem",
+            fontWeight: 600,
+            borderColor: C.border,
+            color: C.text,
+            "&:hover": { borderColor: "#3b82f6", bgcolor: C.hover },
+          }}
+        >
+          Manage Audiences
+        </Button>
       </Box>
 
       {loading ? (
@@ -1509,14 +2015,23 @@ const Newsletter = () => {
                       </Typography>
                     )}
                     {selected.mailchimp_status === "sent" && (
-                      <Chip
-                        icon={<MarkEmailReadIcon style={{ fontSize: 13 }} />}
-                        label="Mailchimp: Sent"
-                        size="small"
-                        color="success"
-                        variant="outlined"
-                        sx={{ height: 22, fontSize: "0.7rem", fontWeight: 600 }}
-                      />
+                      <Tooltip
+                        title={
+                          selected.mailchimp_sent_at
+                            ? `Sent on ${formatDate(selected.mailchimp_sent_at.slice(0, 10))}`
+                            : "Broadcasted via Mailchimp"
+                        }
+                        placement="top"
+                      >
+                        <Chip
+                          icon={<MarkEmailReadIcon style={{ fontSize: 13 }} />}
+                          label="Mailchimp: Sent"
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          sx={{ height: 22, fontSize: "0.7rem", fontWeight: 600, cursor: "default" }}
+                        />
+                      </Tooltip>
                     )}
                     {selected.mailchimp_status === "draft" && (
                       <Chip
@@ -1547,62 +2062,104 @@ const Newsletter = () => {
                   </Box>
 
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Tooltip title={isLiveEditing ? "Exit Live Edit Mode" : "Live Edit Newsletter in Real-Time"} placement="top">
-                      <IconButton
-                        size="small"
-                        onClick={handleToggleLiveEdit}
-                        sx={{
-                          color: isLiveEditing ? "#3b82f6" : "#94a3b8",
-                          bgcolor: isLiveEditing ? "rgba(59, 130, 246, 0.12)" : "transparent",
-                          border: "1px solid",
-                          borderColor: isLiveEditing ? "#3b82f6" : "#334155",
-                          borderRadius: 1,
-                          p: 0.6,
-                          "&:hover": { borderColor: "#3b82f6", color: "#3b82f6" },
-                        }}
-                      >
-                        <EditIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
+                    <Tooltip
+                      title={
+                        selected.mailchimp_status === "sent"
+                          ? "Sent newsletters cannot be edited (locked)"
+                          : isLiveEditing
+                          ? "Exit Live Edit Mode"
+                          : "Live Edit Newsletter in Real-Time"
+                      }
+                      placement="top"
+                    >
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={handleToggleLiveEdit}
+                          disabled={selected.mailchimp_status === "sent"}
+                          sx={{
+                            color: isLiveEditing ? "#3b82f6" : "#94a3b8",
+                            bgcolor: isLiveEditing ? "rgba(59, 130, 246, 0.12)" : "transparent",
+                            border: "1px solid",
+                            borderColor: isLiveEditing ? "#3b82f6" : "#334155",
+                            borderRadius: 1,
+                            p: 0.6,
+                            "&:hover": { borderColor: "#3b82f6", color: "#3b82f6" },
+                            "&.Mui-disabled": { opacity: 0.4, borderColor: "#334155", color: "#64748b" },
+                          }}
+                        >
+                          {selected.mailchimp_status === "sent" ? (
+                            <LockIcon sx={{ fontSize: 16 }} />
+                          ) : (
+                            <EditIcon sx={{ fontSize: 16 }} />
+                          )}
+                        </IconButton>
+                      </span>
                     </Tooltip>
 
-                    <Tooltip title="Send via Mailchimp Immediately" placement="top">
-                      <IconButton
-                        size="small"
-                        onClick={() => {
-                          setCampaignModalMode("send");
-                          setCampaignModalOpen(true);
-                        }}
-                        sx={{
-                          color: "#94a3b8",
-                          border: "1px solid",
-                          borderColor: "#334155",
-                          borderRadius: 1,
-                          p: 0.6,
-                          "&:hover": { borderColor: "#3b82f6", color: "#3b82f6" },
-                        }}
-                      >
-                        <SendIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
+
+                    <Tooltip
+                      title={
+                        selected.mailchimp_status === "sent"
+                          ? "Already broadcasted via Mailchimp"
+                          : "Send via Mailchimp Immediately"
+                      }
+                      placement="top"
+                    >
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={() => {
+                            if (selected.mailchimp_status === "sent") return;
+                            setCampaignModalMode("send");
+                            setCampaignModalOpen(true);
+                          }}
+                          disabled={selected.mailchimp_status === "sent"}
+                          sx={{
+                            color: "#94a3b8",
+                            border: "1px solid",
+                            borderColor: "#334155",
+                            borderRadius: 1,
+                            p: 0.6,
+                            "&:hover": { borderColor: "#3b82f6", color: "#3b82f6" },
+                            "&.Mui-disabled": { opacity: 0.4, borderColor: "#334155", color: "#64748b" },
+                          }}
+                        >
+                          <SendIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </span>
                     </Tooltip>
 
-                    <Tooltip title="Save as Draft in Mailchimp" placement="top">
-                      <IconButton
-                        size="small"
-                        onClick={() => {
-                          setCampaignModalMode("draft");
-                          setCampaignModalOpen(true);
-                        }}
-                        sx={{
-                          color: "#94a3b8",
-                          border: "1px solid",
-                          borderColor: "#334155",
-                          borderRadius: 1,
-                          p: 0.6,
-                          "&:hover": { borderColor: "#f59e0b", color: "#f59e0b" },
-                        }}
-                      >
-                        <DraftsIcon sx={{ fontSize: 16 }} />
-                      </IconButton>
+                    <Tooltip
+                      title={
+                        selected.mailchimp_status === "sent"
+                          ? "Already broadcasted via Mailchimp"
+                          : "Save as Draft in Mailchimp"
+                      }
+                      placement="top"
+                    >
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={() => {
+                            if (selected.mailchimp_status === "sent") return;
+                            setCampaignModalMode("draft");
+                            setCampaignModalOpen(true);
+                          }}
+                          disabled={selected.mailchimp_status === "sent"}
+                          sx={{
+                            color: "#94a3b8",
+                            border: "1px solid",
+                            borderColor: "#334155",
+                            borderRadius: 1,
+                            p: 0.6,
+                            "&:hover": { borderColor: "#f59e0b", color: "#f59e0b" },
+                            "&.Mui-disabled": { opacity: 0.4, borderColor: "#334155", color: "#64748b" },
+                          }}
+                        >
+                          <DraftsIcon sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </span>
                     </Tooltip>
 
                     {selected.mailchimp_status === "sent" && (
@@ -1629,6 +2186,7 @@ const Newsletter = () => {
                 </Box>
 
                 <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: C.cardInner }}>
+
                   <RenderedNewsletter
                     newsletter={selected}
                     isEditing={isLiveEditing}
@@ -1671,6 +2229,20 @@ const Newsletter = () => {
         open={reportModalOpen}
         onClose={() => setReportModalOpen(false)}
         newsletter={selected}
+        C={C}
+      />
+
+      <AudienceManagementModal
+        open={audienceModalOpen}
+        onClose={() => setAudienceModalOpen(false)}
+        onInspectAudience={(aud) => setInspectAudience(aud)}
+        C={C}
+      />
+
+      <AudienceMembersModal
+        open={Boolean(inspectAudience)}
+        onClose={() => setInspectAudience(null)}
+        audience={inspectAudience}
         C={C}
       />
 

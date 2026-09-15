@@ -201,6 +201,49 @@ def build_adaptive_card(job_id: str, keyword: str, article_count: int, articles:
                     "wrap": True,
                 })
 
+            snippet = (article.get("snippet") or article.get("description") or article.get("summary") or "").strip()
+            if snippet:
+                facts = []
+                if source:
+                    facts.append({"title": "Source:", "value": source})
+                if published:
+                    facts.append({"title": "Published:", "value": published[:10]})
+                kw_val = article.get("keyword") or article.get("search_query")
+                if kw_val:
+                    facts.append({"title": "Keyword:", "value": str(kw_val)})
+
+                article_body.append({
+                    "type": "ActionSet",
+                    "spacing": "Small",
+                    "actions": [
+                        {
+                            "type": "Action.ShowCard",
+                            "title": "🔍 Preview Snippet",
+                            "card": {
+                                "type": "AdaptiveCard",
+                                "body": [
+                                    {
+                                        "type": "TextBlock",
+                                        "text": "📝 **Article Excerpt**",
+                                        "weight": "Bolder",
+                                        "size": "Small",
+                                    },
+                                    {
+                                        "type": "TextBlock",
+                                        "text": snippet,
+                                        "wrap": True,
+                                        "isSubtle": True,
+                                    },
+                                    *(
+                                        [{"type": "FactSet", "facts": facts}]
+                                        if facts else []
+                                    ),
+                                ],
+                            },
+                        }
+                    ],
+                })
+
             body.append({
                 "type": "Container",
                 "spacing": "Small",
@@ -247,6 +290,244 @@ def build_adaptive_card(job_id: str, keyword: str, article_count: int, articles:
             },
         },
     ]
+
+    return {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": body,
+        "actions": actions,
+    }
+
+
+def build_newsletter_teams_card(newsletter: Any, db: Any = None) -> dict:
+    """
+    Builds an interactive Microsoft Teams Adaptive Card (v1.4) for a Generated Newsletter,
+    featuring:
+      - Newsletter Header, Subject & Snippet
+      - '👁️ Preview Content' (Action.ShowCard) displaying the full email body and CTA
+      - '🚀 Configure & Send' (Action.ShowCard) with editable fields & multi-select audience checkboxes
+      - '📝 Configure & Save Draft' (Action.ShowCard) with multi-select audience checkboxes
+      - '🌐 Open in Portal' (Action.OpenUrl)
+    """
+    from db_models import UserPreferences, GeneratedNewsletter
+
+    if isinstance(newsletter, dict):
+        nl_id = newsletter.get("id")
+        title = newsletter.get("title") or "TrendSense Newsletter"
+        content = newsletter.get("content") or {}
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except Exception:
+                content = {}
+        mailchimp_status = newsletter.get("mailchimp_status")
+    else:
+        nl_id = newsletter.id
+        title = newsletter.title or "TrendSense Newsletter"
+        try:
+            content = json.loads(newsletter.content_json or "{}")
+        except Exception:
+            content = {}
+        mailchimp_status = newsletter.mailchimp_status
+
+    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    portal_link = f"{frontend_url}/newsletter"
+
+    subject_line = str(content.get("email_subject_line") or title or "TrendSense Industry Digest").strip()
+    preview_snippet = str(content.get("preview_text") or (content.get("hook_paragraph") or "")[:120]).strip()
+    hook = str(content.get("hook_paragraph") or "").strip()
+    stat = str(content.get("stat_paragraph") or "").strip()
+    highlight_stat = str(content.get("highlight_stat") or "").strip()
+    context = str(content.get("context_paragraph") or "").strip()
+    solution = str(content.get("solution_paragraph") or "").strip()
+
+    # Load audience choices from DB UserPreferences
+    audience_choices = []
+    if db is not None:
+        try:
+            pref_row = db.query(UserPreferences).filter_by(key="mailchimp_custom_audiences").first()
+            if pref_row and pref_row.value:
+                custom_list = json.loads(pref_row.value)
+                for item in custom_list:
+                    if item.get("id"):
+                        audience_choices.append({
+                            "title": f"{item.get('name', item.get('id'))} ({item.get('id')})",
+                            "value": str(item.get("id")),
+                        })
+        except Exception as exc:
+            logger.warning("Could not load audience choices for Teams card: %s", exc)
+
+    if not audience_choices:
+        audience_choices = [{"title": "Default Database Audience", "value": "default"}]
+
+    default_choice_val = audience_choices[0]["value"] if audience_choices else ""
+
+    body = [
+        {
+            "type": "Container",
+            "style": "emphasis",
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": f"📰 Newsletter #{nl_id}: {title}",
+                    "weight": "Bolder",
+                    "size": "Medium",
+                    "wrap": True,
+                },
+                {
+                    "type": "TextBlock",
+                    "text": f"**Subject:** {subject_line}\n\n**Preview:** {preview_snippet}",
+                    "wrap": True,
+                    "isSubtle": True,
+                },
+            ],
+        },
+    ]
+
+    actions = [
+        # 1. Expandable Preview Sub-Card
+        {
+            "type": "Action.ShowCard",
+            "title": "👁️ Preview Content",
+            "card": {
+                "type": "AdaptiveCard",
+                "body": [
+                    {
+                        "type": "TextBlock",
+                        "text": "📄 **Full Newsletter Content**",
+                        "weight": "Bolder",
+                        "size": "Medium",
+                    },
+                    {
+                        "type": "TextBlock",
+                        "text": f"**Hook:** {hook}",
+                        "wrap": True,
+                    },
+                    {
+                        "type": "TextBlock",
+                        "text": f"**Key Stat:** {highlight_stat}\n\n{stat}",
+                        "wrap": True,
+                    },
+                    {
+                        "type": "TextBlock",
+                        "text": f"**Context & Modernization:**\n{context}",
+                        "wrap": True,
+                    },
+                    {
+                        "type": "TextBlock",
+                        "text": f"**Solution:**\n{solution}",
+                        "wrap": True,
+                    },
+                    {
+                        "type": "Container",
+                        "style": "accent",
+                        "items": [
+                            {
+                                "type": "TextBlock",
+                                "text": "👉 **Schedule a discovery call** (https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call)",
+                                "wrap": True,
+                                "weight": "Bolder",
+                            }
+                        ],
+                    },
+                ],
+            },
+        },
+    ]
+
+    if mailchimp_status != "sent":
+        # 2. Configure & Send Campaign Sub-Card
+        actions.append({
+            "type": "Action.ShowCard",
+            "title": "🚀 Configure & Send",
+            "card": {
+                "type": "AdaptiveCard",
+                "body": [
+                    {
+                        "type": "TextBlock",
+                        "text": "📢 **Confirm Campaign Broadcast Details**",
+                        "weight": "Bolder",
+                        "size": "Medium",
+                    },
+                    {
+                        "type": "Input.Text",
+                        "id": "subject",
+                        "label": "Email Subject Line",
+                        "value": subject_line,
+                    },
+                    {
+                        "type": "Input.ChoiceSet",
+                        "id": "selected_audiences",
+                        "isMultiSelect": True,
+                        "style": "expanded",
+                        "label": "👥 Target Audience(s) (Select 1 or more):",
+                        "choices": audience_choices,
+                        "value": default_choice_val,
+                    },
+                ],
+                "actions": [
+                    {
+                        "type": "Action.Submit",
+                        "title": "🚀 Confirm & Broadcast Now",
+                        "style": "positive",
+                        "data": {
+                            "action": "newsletter_send",
+                            "newsletter_id": nl_id,
+                        },
+                    },
+                ],
+            },
+        })
+
+        # 3. Configure & Save Draft Sub-Card
+        actions.append({
+            "type": "Action.ShowCard",
+            "title": "📝 Configure & Save Draft",
+            "card": {
+                "type": "AdaptiveCard",
+                "body": [
+                    {
+                        "type": "TextBlock",
+                        "text": "📝 **Save Campaign as Mailchimp Draft**",
+                        "weight": "Bolder",
+                        "size": "Medium",
+                    },
+                    {
+                        "type": "Input.Text",
+                        "id": "subject",
+                        "label": "Draft Subject Line",
+                        "value": subject_line,
+                    },
+                    {
+                        "type": "Input.ChoiceSet",
+                        "id": "selected_audiences",
+                        "isMultiSelect": True,
+                        "style": "expanded",
+                        "label": "👥 Target Audience(s) (Select 1 or more):",
+                        "choices": audience_choices,
+                        "value": default_choice_val,
+                    },
+                ],
+                "actions": [
+                    {
+                        "type": "Action.Submit",
+                        "title": "💾 Save Draft in Mailchimp",
+                        "data": {
+                            "action": "newsletter_draft",
+                            "newsletter_id": nl_id,
+                        },
+                    },
+                ],
+            },
+        })
+
+    # 4. Deep link to Web Portal
+    actions.append({
+        "type": "Action.OpenUrl",
+        "title": "🌐 View in Portal",
+        "url": portal_link,
+    })
 
     return {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -366,10 +647,11 @@ def send_to_teams_webhook(job_id: str, keyword: str, article_count: int, article
 
 def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = "") -> dict:
     """
-    Build an individual Adaptive Card for a generated newsletter with 3 choices:
-      1. Action.OpenUrl -> '✏️ Edit in App' (Opens frontend directly in live edit mode)
-      2. Action.Submit  -> '📁 Save as Draft' (Creates Mailchimp draft without UI popup)
-      3. Action.Submit  -> '✈️ Send via Mailchimp' (Broadcasts via Mailchimp without UI popup)
+    Build an individual Adaptive Card for a generated newsletter with 4 choices:
+      1. Action.OpenUrl -> '👁️ View Full Preview' (Opens full branded email in a new browser tab)
+      2. Action.OpenUrl -> '✏️ Edit in App' (Opens frontend directly in live edit mode)
+      3. Action.Submit  -> '📁 Save as Draft' (Creates Mailchimp draft without UI popup)
+      4. Action.Submit  -> '✈️ Send via Mailchimp' (Broadcasts via Mailchimp without UI popup)
     """
     f_url = (frontend_url or getattr(settings, "FRONTEND_URL", "") or "http://localhost:5173").rstrip("/")
     nl_id = newsletter.get("id")
@@ -388,8 +670,11 @@ def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = 
     highlight_stat = str(content.get("highlight_stat") or "").strip()
     context = str(content.get("context_paragraph") or "").strip()
     solution = str(content.get("solution_paragraph") or "").strip()
-    cta_label = str(content.get("cta_label") or "👉 Schedule a discovery call").strip()
+    cta_label = "👉 Schedule a discovery call"
     full_text = str(content.get("full_text") or "").strip()
+
+    preview_url = f"{f_url}/newsletter?id={nl_id}&preview=true"
+    edit_url = f"{f_url}/newsletter?id={nl_id}&edit=true"
 
     body_items: list[dict] = [
         {
@@ -398,7 +683,7 @@ def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = 
             "items": [
                 {
                     "type": "TextBlock",
-                    "text": f"📰 **Newsletter #{nl_id}: {title}**",
+                    "text": f"📰 **Newsletter #{nl_id}: [{title}]({preview_url})**",
                     "weight": "Bolder",
                     "size": "Medium",
                     "wrap": True,
@@ -415,45 +700,20 @@ def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = 
         },
     ]
 
+    # Render clean continuous newsletter paragraphs without artificial debug headers
     if full_text:
+        body_text = full_text[:1200]
+    else:
+        paras = [hook, stat, context, solution]
+        body_text = "\n\n".join(p for p in paras if p)
+
+    if body_text:
         body_items.append({
             "type": "TextBlock",
-            "text": full_text[:1200],
+            "text": body_text,
             "wrap": True,
             "spacing": "Medium",
         })
-    else:
-        if hook:
-            body_items.append({
-                "type": "TextBlock",
-                "text": f"**💡 Hook:**\n{hook}",
-                "wrap": True,
-                "spacing": "Small",
-            })
-        if stat:
-            stat_text = f"**📊 Key Stat & Source:**\n{stat}"
-            if highlight_stat and highlight_stat in stat:
-                stat_text += f"\n*(Key metric: **{highlight_stat}**)*"
-            body_items.append({
-                "type": "TextBlock",
-                "text": stat_text,
-                "wrap": True,
-                "spacing": "Small",
-            })
-        if context:
-            body_items.append({
-                "type": "TextBlock",
-                "text": f"**🌐 Industry Context:**\n{context}",
-                "wrap": True,
-                "spacing": "Small",
-            })
-        if solution:
-            body_items.append({
-                "type": "TextBlock",
-                "text": f"**🛡️ Tzunami Solution:**\n{solution}",
-                "wrap": True,
-                "spacing": "Small",
-            })
 
     body_items.append({
         "type": "TextBlock",
@@ -464,9 +724,12 @@ def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = 
         "wrap": True,
     })
 
-    edit_url = f"{f_url}/newsletter?id={nl_id}&edit=true"
-
     actions = [
+        {
+            "type": "Action.OpenUrl",
+            "title": "👁️ View Full Preview",
+            "url": preview_url,
+        },
         {
             "type": "Action.OpenUrl",
             "title": "✏️ Edit in App",
@@ -594,47 +857,11 @@ def _fetch_article_content(url: str) -> str:
         return ""
 
 
-# ── DALL-E image generation ───────────────────────────────────────────────────
+# ── Image generation (Disabled — newsletters are text + CTA only) ─────────────
 
-def _generate_newsletter_image(prompt: str, api_key: str) -> str:
-    """
-    Generate a hero image using OpenAI DALL-E.
-    Returns base64-encoded PNG string or "" on failure.
-    """
-    if not api_key or not prompt:
-        return ""
-
-    try:
-        import base64
-        import openai
-        client = openai.OpenAI(api_key=api_key)
-
-        logger.info("DALL-E: generating image for prompt: %s", prompt[:100])
-        resp = client.images.generate(
-            model="gpt-image-1",
-            prompt=prompt,
-            n=1,
-            size="1536x1024",
-            quality="low",
-        )
-
-        image_url = resp.data[0].url
-        if not image_url:
-            logger.warning("DALL-E: no image URL returned")
-            return ""
-
-        img_resp = requests.get(image_url, timeout=60)
-        if img_resp.status_code != 200:
-            logger.warning("DALL-E: failed to download image — HTTP %d", img_resp.status_code)
-            return ""
-
-        b64 = base64.b64encode(img_resp.content).decode("utf-8")
-        logger.info("DALL-E: image generated (%d bytes, %d base64 chars)", len(img_resp.content), len(b64))
-        return b64
-
-    except Exception as exc:
-        logger.error("DALL-E image generation failed: %s", exc)
-        return ""
+def _generate_newsletter_image(prompt: str = "", api_key: str = "") -> str:
+    """Images are disabled for newsletters to maximize email deliverability and avoid policy issues."""
+    return ""
 
 
 # ── Newsletter generation prompt ──────────────────────────────────────────────
@@ -655,7 +882,6 @@ Also generate:
 - email_subject_line: A professional, engaging, high-converting email subject line (under 60 characters) strictly compliant with Mailchimp Acceptable Use and CAN-SPAM policies. AVOID ALL spam trigger words, panic/alarmist phrasing, ALL-CAPS, or clickbait (e.g. do NOT write 'URGENT', 'data breach confirmed', 'hacked', 'act now', 'alert'). Instead, frame the subject around industry insights, data governance, and strategic value (e.g. '[TrendSense] Identity Verification & Cloud Governance Trends').
 - preview_text: A compelling 1-sentence inbox preview snippet (under 100 characters) that complements the subject line.
 - A short CTA button label (e.g. "👉 Schedule a discovery call")
-- A brief image prompt describing a professional, abstract illustration for this topic (for DALL-E generation). The prompt should describe a clean, corporate, modern illustration — NO text, NO logos, NO words in the image. Focus on visual metaphors (shields, clouds, data flows, locks, networks). Style: flat design, blue/teal color palette.
 
 Return ONLY valid JSON — no markdown, no HTML tags (no <span>, no <style>, no <font>, no <b>), no code fences:
 {
@@ -668,8 +894,7 @@ Return ONLY valid JSON — no markdown, no HTML tags (no <span>, no <style>, no 
   "highlight_stat": "The key statistic to display in red (e.g. '60-80%' or '3x more')",
   "context_paragraph": "2-3 sentences connecting to current trends",
   "solution_paragraph": "2-3 sentences introducing Tzunami as the solution",
-  "cta_label": "Button text (e.g. '👉 Schedule a discovery call')",
-  "image_prompt": "Brief description of a professional abstract illustration for DALL-E (no text, no logos)"
+  "cta_label": "Button text (e.g. '👉 Schedule a discovery call')"
 }"""
 
 
@@ -898,6 +1123,14 @@ def process_webhook_response(db, job_id: str, approved: bool,
         except Exception as exc:
             logger.error("Job %s: failed to dispatch newsletter cards to Teams: %s", job_id, exc)
 
+        # Send automated batch completion notification email
+        try:
+            email_sent = send_batch_completion_email(newsletters, job.keyword or "")
+            if email_sent:
+                logger.info("Job %s: batch completion notification email dispatched successfully", job_id)
+        except Exception as exc:
+            logger.error("Job %s: failed to send batch completion email: %s", job_id, exc)
+
         job.status = "completed"
         job.completed_at = _now()
         db.commit()
@@ -937,44 +1170,214 @@ def process_webhook_response(db, job_id: str, approved: bool,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Step 2b: Webhook endpoint helper — parse raw HTTP body from Power Automate
+#  Step 2b: Batch Completion Notification Email
 # ══════════════════════════════════════════════════════════════════════════════
+
+def send_batch_completion_email(newsletters: list[dict], keyword: str = "") -> bool:
+    """
+    Sends a clean, professional, and well-structured email notification to
+    the configured notification address (e.g. AI@tzunami.com / omratnani83@gmail.com)
+    alerting the team that all newsletters for the current batch are ready for review.
+    """
+    recipient = getattr(settings, "NEWSLETTER_NOTIFICATION_EMAIL", "") or os.environ.get("NEWSLETTER_NOTIFICATION_EMAIL", "omratnani83@gmail.com")
+    if not recipient:
+        return False
+
+    if not settings.ALERT_SMTP_USER or not settings.ALERT_SMTP_PASS:
+        logger.info("SMTP credentials not configured — skipping batch completion email to %s", recipient)
+        return False
+
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    subject = "📰 TrendSense: Your Newsletters are Ready for Review on Microsoft Teams"
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{subject}</title>
+</head>
+<body style="margin:0;padding:24px;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:580px;margin:0 auto;background:#ffffff;border-radius:8px;border:1px solid #e2e8f0;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
+    <div style="background:#0f172a;padding:24px 28px;text-align:left;">
+      <h1 style="color:#ffffff;margin:0;font-size:20px;font-weight:700;letter-spacing:-0.02em;">TrendSense Intelligence</h1>
+    </div>
+    <div style="padding:32px 28px;color:#334155;line-height:1.65;font-size:15px;">
+      <p style="margin-top:0;font-weight:600;color:#0f172a;font-size:16px;">Hello Team,</p>
+      <p>Your marketing newsletters have been generated successfully by TrendSense and are now ready for your review.</p>
+      <p>You can preview the complete email layouts, make live edits, save drafts, or broadcast directly to subscribers via <strong>Microsoft Teams</strong> or through the <strong>TrendSense Portal</strong>.</p>
+      <div style="margin:28px 0;text-align:left;">
+        <a href="{frontend_url}/newsletter" style="background-color:#2563eb;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:600;font-size:14px;display:inline-block;">Open TrendSense Portal</a>
+      </div>
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
+      <p style="margin-bottom:0;color:#64748b;font-size:13px;">TrendSense Automated Intelligence System &bull; Tzunami Inc.</p>
+    </div>
+  </div>
+</body>
+</html>"""
+
+    try:
+        with smtplib.SMTP(settings.ALERT_SMTP_HOST, settings.ALERT_SMTP_PORT, timeout=15) as srv:
+            srv.ehlo()
+            srv.starttls()
+            srv.ehlo()
+            srv.login(settings.ALERT_SMTP_USER, settings.ALERT_SMTP_PASS)
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"]    = f"TrendSense <{settings.ALERT_SMTP_USER}>"
+            msg["To"]      = recipient
+            msg.attach(MIMEText(html, "html"))
+            srv.sendmail(settings.ALERT_SMTP_USER, recipient, msg.as_string())
+            logger.info("Batch completion notification email dispatched successfully to %s", recipient)
+            return True
+    except Exception as exc:
+        logger.error("Failed to send batch completion email to %s: %s", recipient, exc)
+        return False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Step 2c: Webhook endpoint helper — parse raw HTTP body from Power Automate
+# ══════════════════════════════════════════════════════════════════════════════
+
+def extract_newsletter_ids(raw_body: dict) -> list[int]:
+    """
+    Extracts all target newsletter IDs from single values, lists, comma strings,
+    or checkbox payload keys (e.g. selected_nl_1, newsletter_ids: [1, 2, 3], selected_ids: [1, 2]).
+    """
+    ids = set()
+
+    # 1. Single ID: "newsletter_id" or "id"
+    for key in ("newsletter_id", "id", "target_id"):
+        if key in raw_body and raw_body[key]:
+            val = str(raw_body[key]).strip()
+            for part in val.split(","):
+                part = part.strip()
+                if part.isdigit():
+                    ids.add(int(part))
+
+    # 2. List or comma-delimited string: "newsletter_ids", "selected_ids", "ids", "target_ids"
+    for key in ("newsletter_ids", "selected_ids", "ids", "target_ids"):
+        if key in raw_body and raw_body[key]:
+            val = raw_body[key]
+            if isinstance(val, (list, set, tuple)):
+                for v in val:
+                    try:
+                        ids.add(int(str(v).strip()))
+                    except (ValueError, TypeError):
+                        pass
+            elif isinstance(val, str):
+                for part in val.split(","):
+                    part = part.strip()
+                    if part.isdigit():
+                        ids.add(int(part))
+
+    # 3. Checkbox format: "selected_nl_123": "true" or "newsletter_123": "true"
+    for k, v in raw_body.items():
+        if (k.startswith("selected_nl_") or k.startswith("selected_newsletter_") or k.startswith("newsletter_selected_")) and str(v).lower() == "true":
+            try:
+                nl_id = int(k.rsplit("_", 1)[-1])
+                ids.add(nl_id)
+            except ValueError:
+                pass
+
+    return sorted(list(ids))
+
 
 def handle_teams_submission(db, raw_body: dict) -> dict:
     """
     Convenience wrapper called directly by the FastAPI webhook endpoints.
     Handles:
-      1. Individual newsletter actions from Teams:
-         - action == "newsletter_draft" -> calls create_and_send_campaign(draft_only=True)
-         - action == "newsletter_send"  -> calls create_and_send_campaign(draft_only=False)
+      1. Single or Multi-Newsletter Batch Actions from Teams (Draft or Send):
+         - action in ("newsletter_draft", "newsletter_send", "newsletter_draft_batch", "newsletter_send_batch")
+         - Loops through ALL extracted newsletter IDs and processes each to Mailchimp with rate-limit pacing.
       2. Initial article selection approval / rejection from Teams.
     """
     action = raw_body.get("action", "")
-    newsletter_id = raw_body.get("newsletter_id")
+    target_ids = extract_newsletter_ids(raw_body)
 
-    # ── Handle Individual Newsletter Action (Draft or Send from Teams) ────────
-    if action in ("newsletter_draft", "newsletter_send") and newsletter_id:
+    # ── Handle Newsletter Actions (Single or Batch Draft / Send from Teams) ────
+    if action in ("newsletter_draft", "newsletter_send", "newsletter_draft_batch", "newsletter_send_batch") and target_ids:
         from services.mailchimp_service import create_and_send_campaign
-        is_draft = action == "newsletter_draft"
-        nl_id = int(str(newsletter_id).strip())
-        logger.info("Received Teams newsletter action: %s for newsletter #%d", action, nl_id)
-        try:
-            result = create_and_send_campaign(db, newsletter_id=nl_id, draft_only=is_draft)
-            return {
-                "status": "ok",
-                "action": "draft" if is_draft else "send",
-                "newsletter_id": nl_id,
-                "detail": f"Newsletter #{nl_id} successfully {'saved as draft in' if is_draft else 'broadcasted via'} Mailchimp.",
-                **result,
-            }
-        except Exception as exc:
-            logger.error("Failed to execute Teams %s action for newsletter #%d: %s", action, nl_id, exc)
-            return {
-                "status": "error",
-                "action": "draft" if is_draft else "send",
-                "newsletter_id": nl_id,
-                "detail": str(exc),
-            }
+        from db_models import GeneratedNewsletter
+
+        is_draft = "draft" in action
+        # Extract audience selection and customized fields from Teams Adaptive Card payload
+        selected_aud_raw = raw_body.get("selected_audiences") or raw_body.get("audience_ids") or raw_body.get("audience_id")
+        target_audiences: list[str] = []
+        if isinstance(selected_aud_raw, list):
+            target_audiences = [str(a).strip() for a in selected_aud_raw if str(a).strip() and str(a).strip().lower() != "default"]
+        elif isinstance(selected_aud_raw, str):
+            target_audiences = [a.strip() for a in selected_aud_raw.split(",") if a.strip() and a.strip().lower() != "default"]
+
+        custom_subject = (raw_body.get("subject") or raw_body.get("custom_subject") or "").strip() or None
+        custom_preview = (raw_body.get("preview_text") or "").strip() or None
+        custom_from_name = (raw_body.get("from_name") or "").strip() or None
+        custom_from_email = (raw_body.get("from_email") or "").strip() or None
+
+        results = []
+        errors = []
+
+        for idx, nl_id in enumerate(target_ids):
+            nl_row = db.query(GeneratedNewsletter).filter_by(id=nl_id).first()
+            if not nl_row:
+                errors.append({"newsletter_id": nl_id, "error": "Newsletter not found in database"})
+                continue
+
+            # Prevent re-sending already-sent newsletters
+            if nl_row.mailchimp_status == "sent":
+                logger.info("Newsletter #%d is already sent — skipping duplicate dispatch", nl_id)
+                results.append({
+                    "newsletter_id": nl_id,
+                    "status": "already_sent",
+                    "title": nl_row.title,
+                    "detail": f"Newsletter #{nl_id} was already broadcasted on {nl_row.mailchimp_sent_at}.",
+                })
+                continue
+
+            try:
+                res = create_and_send_campaign(
+                    db,
+                    newsletter_id=nl_id,
+                    audience_ids=target_audiences if target_audiences else None,
+                    subject=custom_subject,
+                    preview_text=custom_preview,
+                    from_name=custom_from_name,
+                    from_email=custom_from_email,
+                    draft_only=is_draft,
+                )
+                results.append({
+                    "newsletter_id": nl_id,
+                    "status": "ok",
+                    "action": "draft" if is_draft else "send",
+                    "campaign_id": res.get("campaign_id"),
+                    "web_id": res.get("web_id"),
+                    "title": nl_row.title,
+                    "audiences_count": res.get("audiences_count", 1),
+                })
+                logger.info("Processed newsletter #%d (%s) [%d/%d]", nl_id, "draft" if is_draft else "send", idx + 1, len(target_ids))
+            except Exception as exc:
+                logger.error("Failed to process newsletter #%d in batch: %s", nl_id, exc)
+                errors.append({"newsletter_id": nl_id, "error": str(exc)})
+
+            # 300ms inter-campaign pacing to respect Mailchimp API rate limits
+            if idx < len(target_ids) - 1:
+                time.sleep(0.3)
+
+        success_count = len([r for r in results if r.get("status") == "ok"])
+        return {
+            "status": "ok" if success_count > 0 or not errors else "error",
+            "action": "draft" if is_draft else "send",
+            "total_requested": len(target_ids),
+            "processed_count": success_count,
+            "error_count": len(errors),
+            "results": results,
+            "errors": errors,
+            "detail": f"Successfully processed {success_count}/{len(target_ids)} newsletters.",
+        }
 
     # ── Initial Article Selection Approval / Rejection ────────────────────────
     action = action or "approve"
@@ -1101,7 +1504,6 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
             "context_paragraph": "",
             "solution_paragraph": "Tzunami provides the visibility and control organizations need.",
             "cta_label": "👉 Schedule a discovery call",
-            "image_prompt": f"A professional abstract illustration about {keyword}",
         }
 
     # Auto-sanitize all text fields to guarantee zero raw HTML tags
@@ -1109,11 +1511,9 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
         if key in content_parsed and isinstance(content_parsed[key], str):
             content_parsed[key] = re.sub(r"<[^>]+>", "", content_parsed[key]).strip()
 
-    # Generate hero image via DALL-E
-    image_prompt = content_parsed.get("image_prompt", "")
-    image_data = _generate_newsletter_image(image_prompt, api_key)
-    content_parsed["image_data"] = image_data
     content_parsed["keyword"] = keyword
+    content_parsed["cta_label"] = "👉 Schedule a discovery call"
+    content_parsed["cta_url"] = "https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call"
 
     try:
         from llm_service import _record_llm_spend

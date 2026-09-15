@@ -170,7 +170,7 @@ async def update_newsletter(
     newsletter_id: int = FPath(...),
     db: Session = Depends(get_db),
 ):
-    """Updates newsletter title and content JSON in the database."""
+    """Updates newsletter title and content JSON in the database (locked if already sent)."""
     import json
     from db_models import GeneratedNewsletter
     from newsletter_service import _newsletter_dict
@@ -178,6 +178,12 @@ async def update_newsletter(
     nl = db.query(GeneratedNewsletter).filter(GeneratedNewsletter.id == newsletter_id).first()
     if not nl:
         raise HTTPException(404, f"Newsletter {newsletter_id} not found")
+
+    if nl.mailchimp_status == "sent":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Newsletter #{newsletter_id} was already sent via Mailchimp on {nl.mailchimp_sent_at} and is locked from editing."
+        )
 
     try:
         body = await request.json()
@@ -209,17 +215,29 @@ async def update_newsletter(
 
 
 @router.get("/api/mailchimp/config", tags=["Mailchimp"])
-def get_mailchimp_config():
-    """Returns whether Mailchimp is configured in .env and current non-sensitive settings."""
+def get_mailchimp_config(db: Session = Depends(get_db)):
+    """Returns whether Mailchimp is configured in .env and database-configured audiences."""
     from services.mailchimp_service import get_mailchimp_credentials
     from core.config import settings
+    from db_models import UserPreferences
+    import json
+
     key, prefix = get_mailchimp_credentials()
+
+    pref_row = db.query(UserPreferences).filter_by(key="mailchimp_custom_audiences").first()
+    custom_audiences = []
+    if pref_row and pref_row.value:
+        try:
+            custom_audiences = json.loads(pref_row.value)
+        except Exception:
+            pass
+
     return {
         "configured": bool(key),
         "server_prefix": prefix if key else None,
-        "default_audience_id": getattr(settings, "MAILCHIMP_AUDIENCE_ID", "") or None,
         "default_from_name": getattr(settings, "MAILCHIMP_FROM_NAME", "") or "TrendSense Newsletter",
         "default_from_email": getattr(settings, "MAILCHIMP_FROM_EMAIL", "") or None,
+        "custom_audiences": custom_audiences,
     }
 
 
@@ -246,6 +264,32 @@ def get_mailchimp_audiences():
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/api/mailchimp/audiences/{audience_id}/members", tags=["Mailchimp"])
+def get_mailchimp_audience_members(
+    audience_id: str,
+    status: Optional[str] = None,
+    count: int = 50,
+    offset: int = 0,
+):
+    """List subscriber members/contacts belonging to an audience list."""
+    from services.mailchimp_service import get_audience_members
+    try:
+        data = get_audience_members(
+            audience_id=audience_id,
+            status=status,
+            count=count,
+            offset=offset,
+        )
+        return data
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Failed to fetch audience members for %s: %s", audience_id, exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/api/newsletters/{newsletter_id}/mailchimp/send", tags=["Mailchimp"])
 async def send_newsletter_via_mailchimp(
     request: Request,
@@ -264,6 +308,7 @@ async def send_newsletter_via_mailchimp(
             db=db,
             newsletter_id=newsletter_id,
             audience_id=body.get("audience_id"),
+            audience_ids=body.get("audience_ids"),
             subject=body.get("subject"),
             preview_text=body.get("preview_text"),
             from_name=body.get("from_name"),
@@ -301,6 +346,7 @@ async def schedule_newsletter_via_mailchimp(
             db=db,
             newsletter_id=newsletter_id,
             audience_id=body.get("audience_id"),
+            audience_ids=body.get("audience_ids"),
             subject=body.get("subject"),
             preview_text=body.get("preview_text"),
             from_name=body.get("from_name"),
@@ -335,6 +381,7 @@ async def draft_newsletter_via_mailchimp(
             db=db,
             newsletter_id=newsletter_id,
             audience_id=body.get("audience_id"),
+            audience_ids=body.get("audience_ids"),
             subject=body.get("subject"),
             preview_text=body.get("preview_text"),
             from_name=body.get("from_name"),

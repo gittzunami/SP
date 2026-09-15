@@ -56,12 +56,13 @@ class Settings:
     STACKAPPS_KEY: str       = os.environ.get("STACKAPPS_KEY", "")
     SCRAPEDO_KEY: str        = os.environ.get("SCRAPEDO_KEY", "")
 
-    # ── Mailchimp ─────────────────────────────────────────────────────────────
-    MAILCHIMP_API_KEY: str       = os.environ.get("MAILCHIMP_API_KEY", "").strip()
-    MAILCHIMP_SERVER_PREFIX: str = os.environ.get("MAILCHIMP_SERVER_PREFIX", "").strip()
-    MAILCHIMP_AUDIENCE_ID: str   = os.environ.get("MAILCHIMP_AUDIENCE_ID", "").strip()
-    MAILCHIMP_FROM_NAME: str     = os.environ.get("MAILCHIMP_FROM_NAME", "TrendSense Newsletter").strip()
-    MAILCHIMP_FROM_EMAIL: str    = os.environ.get("MAILCHIMP_FROM_EMAIL", "").strip()
+    # ── Mailchimp & Notifications ─────────────────────────────────────────────
+    MAILCHIMP_API_KEY: str             = os.environ.get("MAILCHIMP_API_KEY", "").strip()
+    MAILCHIMP_SERVER_PREFIX: str       = os.environ.get("MAILCHIMP_SERVER_PREFIX", "").strip()
+    MAILCHIMP_FROM_NAME: str           = os.environ.get("MAILCHIMP_FROM_NAME", "TrendSense Newsletter").strip()
+    MAILCHIMP_FROM_EMAIL: str          = os.environ.get("MAILCHIMP_FROM_EMAIL", "").strip()
+    NEWSLETTER_NOTIFICATION_EMAIL: str = os.environ.get("NEWSLETTER_NOTIFICATION_EMAIL", "omratnani83@gmail.com").strip()
+    NEWSLETTER_DEFAULT_CTA_URL: str    = os.environ.get("NEWSLETTER_DEFAULT_CTA_URL", "https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call").strip()
 
 
 settings = Settings()

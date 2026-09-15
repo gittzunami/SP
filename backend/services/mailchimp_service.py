@@ -31,7 +31,8 @@ from core.config import settings
 logger = logging.getLogger("mailchimp_service")
 
 # ── CTA & Brand Defaults ──────────────────────────────────────────────────────
-DEFAULT_CTA_URL = "https://booking.cloudsfer.com/meetings/book-tzunami/cloudsfer-sales-discovery-?uuid=9c89c0bf-3626-47ed-831c-f5e2a8ce1380"
+DEFAULT_CTA_URL = getattr(settings, "NEWSLETTER_DEFAULT_CTA_URL", "https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call")
+DEFAULT_CTA_LABEL = "👉 Schedule a discovery call"
 
 SOCIAL_LINKS = [
     {
@@ -189,14 +190,146 @@ def get_audiences(
     return lists
 
 
+def get_audience_members(
+    audience_id: str,
+    status: Optional[str] = None,
+    count: int = 50,
+    offset: int = 0,
+    api_key: Optional[str] = None,
+    server_prefix: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Retrieve subscriber members/contacts from a specific Mailchimp audience."""
+    key, prefix = get_mailchimp_credentials(api_key, server_prefix)
+    if not key:
+        raise ValueError("Mailchimp API key is not configured.")
+
+    params: dict[str, Any] = {"count": count, "offset": offset}
+    if status and status.lower() != "all":
+        params["status"] = status.lower()
+
+    url = f"https://{prefix}.api.mailchimp.com/3.0/lists/{audience_id}/members"
+    session = _get_auth_session(key)
+    resp = session.get(url, params=params, timeout=15)
+
+    if resp.status_code != 200:
+        try:
+            err = resp.json().get("detail", resp.text)
+        except Exception:
+            err = resp.text
+        raise RuntimeError(f"Mailchimp API error ({resp.status_code}): {err}")
+
+    data = resp.json()
+    members = []
+    for item in data.get("members", []):
+        merge_fields = item.get("merge_fields", {}) or {}
+        stats = item.get("stats", {}) or {}
+        tags = [t.get("name") for t in item.get("tags", []) if t.get("name")]
+        fname = str(merge_fields.get("FNAME") or "").strip()
+        lname = str(merge_fields.get("LNAME") or "").strip()
+        full_name = f"{fname} {lname}".strip() or None
+
+        members.append({
+            "id": item.get("id"),
+            "email_address": item.get("email_address"),
+            "full_name": full_name,
+            "status": item.get("status"),
+            "rating": item.get("member_rating"),
+            "opt_in_time": item.get("timestamp_opt"),
+            "last_changed": item.get("last_changed"),
+            "avg_open_rate": stats.get("avg_open_rate", 0),
+            "avg_click_rate": stats.get("avg_click_rate", 0),
+            "tags": tags,
+        })
+
+    return {
+        "audience_id": audience_id,
+        "total_items": data.get("total_items", len(members)),
+        "members": members,
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
-#  3. HTML Template Rendering
+#  3. Mailchimp File Manager CDN Upload & Policy Compliance
 # ══════════════════════════════════════════════════════════════════════════════
 
-def render_newsletter_html(newsletter_dict: Dict[str, Any]) -> str:
+def upload_image_to_mailchimp(
+    base64_image_data: str,
+    file_name: str = "newsletter_hero.png",
+    api_key: Optional[str] = None,
+    server_prefix: Optional[str] = None,
+) -> Optional[str]:
     """
-    Renders an inline-styled, responsive HTML email compatible with Mailchimp standards.
-    Includes merge tags (*|UNSUB|*, *|UPDATE_PROFILE|*) and Tzunami branding.
+    Uploads a base64 image to Mailchimp's official File Manager / CDN.
+    Returns the public HTTPS URL (e.g. https://cdn-images.mailchimp.com/...)
+    so the HTML email contains a clean CDN URL instead of megabytes of raw base64 data,
+    protecting against Mailchimp Omnivore spam/malware account bans.
+    """
+    if not base64_image_data:
+        return None
+    key, prefix = get_mailchimp_credentials(api_key, server_prefix)
+    if not key:
+        return None
+
+    clean_b64 = str(base64_image_data).strip()
+    if "base64," in clean_b64:
+        clean_b64 = clean_b64.split("base64,")[1]
+
+    url = f"https://{prefix}.api.mailchimp.com/3.0/file-manager/files"
+    session = _get_auth_session(key)
+    try:
+        resp = session.post(url, json={
+            "name": file_name,
+            "file_data": clean_b64,
+        }, timeout=30)
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            cdn_url = data.get("full_size_url")
+            logger.info("Successfully uploaded hero image to Mailchimp CDN: %s", cdn_url)
+            return cdn_url
+        else:
+            logger.warning("Mailchimp file-manager upload returned status %d: %s", resp.status_code, resp.text[:200])
+            return None
+    except Exception as exc:
+        logger.error("Failed to upload image to Mailchimp CDN: %s", exc)
+        return None
+
+
+def validate_campaign_compliance(
+    subject: str,
+    preview_text: str = "",
+    body_text: str = "",
+) -> Tuple[bool, List[str]]:
+    """
+    Scans campaign content against Mailchimp Acceptable Use Policy & CAN-SPAM rules.
+    Returns (is_compliant, list_of_violations_or_warnings).
+    """
+    violations = []
+    if not subject or not subject.strip():
+        violations.append("Subject line cannot be empty.")
+    elif len(subject) > 150:
+        violations.append("Subject line is too long (>150 characters).")
+
+    # Flag raw base64 embedded in HTML payload or preview text
+    full_content = f"{subject} {preview_text} {body_text}"
+    if ("data:image/" in full_content and "base64" in full_content) or ";base64," in full_content:
+        violations.append("Email contains raw embedded base64 binary images. Images must be hosted on CDN to avoid Mailchimp Omnivore bans.")
+
+    # Check for CAN-SPAM tags if full HTML is present
+    if body_text and ("<html" in body_text.lower() or "<body" in body_text.lower()):
+        if "*|UNSUB|*" not in body_text and "*|ARCHIVE|*" not in body_text:
+            violations.append("Email HTML is missing mandatory *|UNSUB|* merge tag required by CAN-SPAM and Mailchimp policy.")
+        if "*|HTML:LIST_ADDRESS_HTML|*" not in body_text and "*|LIST:ADDRESS|*" not in body_text:
+            violations.append("Email HTML is missing mandatory postal address tag (*|HTML:LIST_ADDRESS_HTML|*) required by CAN-SPAM.")
+
+    return (len(violations) == 0, violations)
+
+
+def render_newsletter_html(newsletter_dict: Dict[str, Any], image_cdn_url: Optional[str] = None) -> str:
+    """
+    Renders an inline-styled, responsive HTML email strictly compliant with
+    Mailchimp Acceptable Use Policy and CAN-SPAM standards.
+    Includes official merge tags (*|UNSUB|*, *|HTML:LIST_ADDRESS_HTML|*, *|UPDATE_PROFILE|*).
+    Images are omitted to guarantee maximum deliverability and avoid spam/filtering issues.
     """
     title = str(newsletter_dict.get("title") or "TrendSense Newsletter")
     c = newsletter_dict.get("content") or {}
@@ -206,8 +339,7 @@ def render_newsletter_html(newsletter_dict: Dict[str, Any]) -> str:
     highlight = str(c.get("highlight_stat") or "")
     context = str(c.get("context_paragraph") or "")
     solution = str(c.get("solution_paragraph") or "")
-    cta_label = str(c.get("cta_label") or "👉 Schedule a discovery call")
-    image_data = str(c.get("image_data") or "")
+    cta_label = DEFAULT_CTA_LABEL
 
     def _strip_html(s: str) -> str:
         if not s:
@@ -266,12 +398,6 @@ def render_newsletter_html(newsletter_dict: Dict[str, Any]) -> str:
         """)
     social_icons_html = "\n".join(social_cells)
 
-    image_section = (
-        f'<p dir="ltr" style="color:#222222;margin:10px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:150%;text-align:left;"><img src="data:image/png;base64,{image_data}" style="border:0;width:600px;max-width:100%;height:auto;margin:0;outline:none;text-decoration:none;" width="600"></p>'
-        if image_data
-        else ""
-    )
-
     full_text = str(c.get("full_text") or c.get("body_text") or "").strip()
     if full_text:
         paras = [p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()]
@@ -280,14 +406,18 @@ def render_newsletter_html(newsletter_dict: Dict[str, Any]) -> str:
             for p in paras
         )
     else:
-        hook_html = f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">{_esc(hook)}</span></p>' if hook else ""
-        stat_html = f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;">{_highlight_stat(stat, highlight)}</p>' if stat else ""
-        context_html = f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">{_esc(context)}</span></p>' if context else ""
-        solution_html = f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">{_esc(solution)}</span></p>' if solution else ""
-        body_paras_html = "\n".join(filter(None, [hook_html, stat_html, context_html, solution_html]))
+        body_paras = []
+        if hook:
+            body_paras.append(f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">{_esc(hook)}</span></p>')
+        if stat:
+            body_paras.append(f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;">{_highlight_stat(stat, highlight)}</p>')
+        if context:
+            body_paras.append(f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">{_esc(context)}</span></p>')
+        if solution:
+            body_paras.append(f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">{_esc(solution)}</span></p>')
+        body_paras_html = "\n".join(body_paras)
 
     return f"""<!doctype html>
-
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
   <head>
     <meta charset="UTF-8">
@@ -324,9 +454,7 @@ def render_newsletter_html(newsletter_dict: Dict[str, Any]) -> str:
                   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
                     <tr>
                       <td valign="top" style="font-family:Helvetica,Arial,sans-serif;color:#222222;font-size:16px;line-height:150%;">
-                        {image_section}
                         {body_paras_html}
-
                       </td>
                     </tr>
                   </table>
@@ -361,11 +489,12 @@ def render_newsletter_html(newsletter_dict: Dict[str, Any]) -> str:
               <!-- FOOTER (CAN-SPAM / Mailchimp Merge Tags) -->
               <tr>
                 <td align="center" valign="top" style="background-color:#333333;padding:24px 20px;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:150%;color:#FFFFFF;text-align:center;">
-                  <em>Copyright &copy; *|CURRENT_YEAR|* Tzunami Inc. All rights reserved.</em><br><br>
+                  <em>Copyright &copy; *|CURRENT_YEAR|* *|LIST:COMPANY|*. All rights reserved.</em><br><br>
                   <strong>Our mailing address:</strong><br>
-                  *|LIST:COMPANY|* &bull; *|LIST:ADDRESSLINE|*<br><br>
+                  *|HTML:LIST_ADDRESS_HTML|*<br><br>
                   Want to change how you receive these emails?<br>
-                  You can <a href="*|UPDATE_PROFILE|*" style="color:#2BAADF;text-decoration:underline;">update your preferences</a> or <a href="*|UNSUB|*" style="color:#2BAADF;text-decoration:underline;">unsubscribe from this list</a>.
+                  You can <a href="*|UPDATE_PROFILE|*" style="color:#2BAADF;text-decoration:underline;">update your preferences</a> or <a href="*|UNSUB|*" style="color:#2BAADF;text-decoration:underline;">unsubscribe from this list</a>.<br><br>
+                  *|REWARDS|*
                 </td>
               </tr>
             </table>
@@ -385,6 +514,7 @@ def create_and_send_campaign(
     db,
     newsletter_id: int,
     audience_id: Optional[str] = None,
+    audience_ids: Optional[list[str]] = None,
     subject: Optional[str] = None,
     preview_text: Optional[str] = None,
     from_name: Optional[str] = None,
@@ -394,36 +524,58 @@ def create_and_send_campaign(
 ) -> Dict[str, Any]:
     """
     Main pipeline:
-      1. Load GeneratedNewsletter from DB
-      2. Render HTML template
-      3. Create Mailchimp Campaign draft
-      4. Set campaign content (HTML)
-      5. Send immediately OR schedule for later OR leave as draft
-      6. Update DB record with campaign_id and status
+      1. Load GeneratedNewsletter from DB & check sent lock
+      2. Resolve target audience(s) strictly from request or database UserPreferences (no .env fallback)
+      3. Render CAN-SPAM compliant HTML template
+      4. Create Mailchimp Campaign(s) for each selected audience
+      5. Set campaign content (HTML)
+      6. Send immediately OR schedule for later OR leave as draft
+      7. Update DB record with campaign_id and status
     """
-    from db_models import GeneratedNewsletter
+    from db_models import GeneratedNewsletter, UserPreferences
 
     row = db.query(GeneratedNewsletter).filter_by(id=newsletter_id).first()
     if not row:
         raise ValueError(f"Newsletter with id {newsletter_id} not found.")
 
+    # Guard: Sent newsletters cannot be re-sent or overwritten
+    if row.mailchimp_status == "sent":
+        raise ValueError(
+            f"Newsletter #{newsletter_id} was already broadcasted via Mailchimp on "
+            f"{row.mailchimp_sent_at.isoformat() if row.mailchimp_sent_at else 'earlier'}. "
+            "Re-sending is locked."
+        )
+
     key, prefix = get_mailchimp_credentials()
     if not key:
         raise ValueError("Mailchimp API key is not configured. Please set MAILCHIMP_API_KEY in your .env file.")
 
-    target_audience = (
-        audience_id
-        or getattr(settings, "MAILCHIMP_AUDIENCE_ID", "")
-        or os.environ.get("MAILCHIMP_AUDIENCE_ID", "")
-    ).strip()
+    # ── Resolve target audience(s) strictly from request or database ──────────
+    target_audiences: list[str] = []
+    if audience_ids and isinstance(audience_ids, list):
+        target_audiences = [str(a).strip() for a in audience_ids if str(a).strip()]
+    elif audience_id:
+        target_audiences = [a.strip() for a in str(audience_id).split(",") if a.strip()]
 
-    if not target_audience:
+    # If not passed in request, query DB UserPreferences (strictly no .env fallback)
+    if not target_audiences:
+        pref_row = db.query(UserPreferences).filter_by(key="mailchimp_custom_audiences").first()
+        if pref_row and pref_row.value:
+            try:
+                custom_list = json.loads(pref_row.value)
+                if isinstance(custom_list, list):
+                    target_audiences = [str(item.get("id")).strip() for item in custom_list if item.get("id")]
+            except Exception:
+                pass
+
+    if not target_audiences:
+        # Fallback: query live Mailchimp API for audiences
         audiences = get_audiences(key, prefix)
         if audiences:
-            target_audience = audiences[0]["id"]
-            logger.info("Auto-selected first Mailchimp audience: %s (%s)", audiences[0]["name"], target_audience)
+            target_audiences = [audiences[0]["id"]]
+            logger.info("Auto-selected first Mailchimp audience: %s (%s)", audiences[0]["name"], target_audiences[0])
         else:
-            raise ValueError("No Mailchimp Audience found. Please provide an Audience ID or create one in Mailchimp.")
+            raise ValueError("No Mailchimp Audience found. Please configure an audience in Manage Audiences.")
 
     sender_name = (
         from_name
@@ -457,110 +609,133 @@ def create_and_send_campaign(
         or str(content_dict.get("hook_paragraph") or "")[:120].strip()
     )
 
-    session = _get_auth_session(key)
-
-    campaign_payload = {
-        "type": "regular",
-        "recipients": {
-            "list_id": target_audience,
-        },
-        "settings": {
-            "subject_line": campaign_subject,
-            "preview_text": snippet,
-            "title": f"TrendSense: {campaign_subject[:80]}",
-            "from_name": sender_name,
-            "reply_to": sender_email,
-            "authenticate": True,
-            "auto_footer": False,
-            "inline_css": True,
-        },
-    }
-
-    create_url = f"https://{prefix}.api.mailchimp.com/3.0/campaigns"
-    logger.info("Creating Mailchimp campaign for newsletter #%d (%s) [draft_only=%s]", newsletter_id, campaign_subject, draft_only)
-    resp = session.post(create_url, json=campaign_payload, timeout=20)
-    if resp.status_code not in (200, 201):
-        try:
-            err = resp.json().get("detail", resp.text)
-        except Exception:
-            err = resp.text
-        raise RuntimeError(f"Failed to create Mailchimp campaign ({resp.status_code}): {err}")
-
-    camp_data = resp.json()
-    campaign_id = camp_data.get("id")
-    web_id = str(camp_data.get("web_id") or "")
-
     newsletter_dict = {
         "title": campaign_subject,
         "content": content_dict,
     }
     rendered_html = render_newsletter_html(newsletter_dict)
 
-    content_url = f"https://{prefix}.api.mailchimp.com/3.0/campaigns/{campaign_id}/content"
-    content_resp = session.put(content_url, json={"html": rendered_html}, timeout=20)
-    if content_resp.status_code not in (200, 201):
-        try:
-            err = content_resp.json().get("detail", content_resp.text)
-        except Exception:
-            err = content_resp.text
-        raise RuntimeError(f"Failed to set campaign content ({content_resp.status_code}): {err}")
+    # Validate HTML content compliance before uploading
+    ok_compl, compl_issues = validate_campaign_compliance(campaign_subject, snippet, rendered_html)
+    if not ok_compl:
+        logger.warning("Compliance validation notices for newsletter #%d: %s", newsletter_id, compl_issues)
 
+    session = _get_auth_session(key)
+    create_url = f"https://{prefix}.api.mailchimp.com/3.0/campaigns"
     now = datetime.now(tz=timezone.utc)
     status = "sent"
 
-    if draft_only:
-        status = "draft"
-        logger.info("Successfully created Mailchimp draft campaign %s (web_id: %s)", campaign_id, web_id)
-    elif schedule_time_iso:
-        try:
-            dt = datetime.fromisoformat(schedule_time_iso.replace("Z", "+00:00"))
-            # Mailchimp requires minutes to be 00, 15, 30, or 45
-            rem = dt.minute % 15
-            if rem != 0:
-                dt = dt + timedelta(minutes=(15 - rem))
-            dt = dt.replace(second=0, microsecond=0)
-            formatted_sched_time = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-        except Exception:
-            formatted_sched_time = schedule_time_iso
+    created_campaigns: list[dict] = []
 
-        sched_url = f"https://{prefix}.api.mailchimp.com/3.0/campaigns/{campaign_id}/actions/schedule"
-        logger.info("Scheduling Mailchimp campaign %s for %s", campaign_id, formatted_sched_time)
-        sched_resp = session.post(sched_url, json={"schedule_time": formatted_sched_time}, timeout=20)
-        if sched_resp.status_code not in (200, 204):
+    # ── Process campaign for each target audience ─────────────────────────────
+    for idx, target_aud in enumerate(target_audiences):
+        campaign_payload = {
+            "type": "regular",
+            "recipients": {
+                "list_id": target_aud,
+            },
+            "settings": {
+                "subject_line": campaign_subject,
+                "preview_text": snippet,
+                "title": f"TrendSense: {campaign_subject[:80]}",
+                "from_name": sender_name,
+                "reply_to": sender_email,
+                "authenticate": True,
+                "auto_footer": False,
+                "inline_css": True,
+            },
+        }
+
+        logger.info("Creating Mailchimp campaign for audience %s (newsletter #%d) [draft_only=%s]", target_aud, newsletter_id, draft_only)
+        resp = session.post(create_url, json=campaign_payload, timeout=20)
+        if resp.status_code not in (200, 201):
             try:
-                err = sched_resp.json().get("detail", sched_resp.text)
+                err = resp.json().get("detail", resp.text)
             except Exception:
-                err = sched_resp.text
-            raise RuntimeError(f"Failed to schedule campaign ({sched_resp.status_code}): {err}")
-        status = "scheduled"
+                err = resp.text
+            raise RuntimeError(f"Failed to create Mailchimp campaign for audience {target_aud} ({resp.status_code}): {err}")
 
-    else:
-        send_url = f"https://{prefix}.api.mailchimp.com/3.0/campaigns/{campaign_id}/actions/send"
-        send_resp = session.post(send_url, timeout=20)
-        if send_resp.status_code not in (200, 204):
+        camp_data = resp.json()
+        campaign_id = camp_data.get("id")
+        web_id = str(camp_data.get("web_id") or "")
+
+        # Upload HTML content
+        content_url = f"https://{prefix}.api.mailchimp.com/3.0/campaigns/{campaign_id}/content"
+        content_resp = session.put(content_url, json={"html": rendered_html}, timeout=20)
+        if content_resp.status_code not in (200, 201):
             try:
-                err = send_resp.json().get("detail", send_resp.text)
+                err = content_resp.json().get("detail", content_resp.text)
             except Exception:
-                err = send_resp.text
-            raise RuntimeError(f"Failed to send campaign ({send_resp.status_code}): {err}")
-        status = "sent"
+                err = content_resp.text
+            raise RuntimeError(f"Failed to set campaign content for audience {target_aud} ({content_resp.status_code}): {err}")
 
-    row.mailchimp_campaign_id = campaign_id
+        if draft_only:
+            status = "draft"
+            logger.info("Successfully created Mailchimp draft campaign %s for audience %s (web_id: %s)", campaign_id, target_aud, web_id)
+        elif schedule_time_iso:
+            try:
+                dt = datetime.fromisoformat(schedule_time_iso.replace("Z", "+00:00"))
+                rem = dt.minute % 15
+                if rem != 0:
+                    dt = dt + timedelta(minutes=(15 - rem))
+                dt = dt.replace(second=0, microsecond=0)
+                formatted_sched_time = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+            except Exception:
+                formatted_sched_time = schedule_time_iso
+
+            sched_url = f"https://{prefix}.api.mailchimp.com/3.0/campaigns/{campaign_id}/actions/schedule"
+            logger.info("Scheduling Mailchimp campaign %s for audience %s at %s", campaign_id, target_aud, formatted_sched_time)
+            sched_resp = session.post(sched_url, json={"schedule_time": formatted_sched_time}, timeout=20)
+            if sched_resp.status_code not in (200, 204):
+                try:
+                    err = sched_resp.json().get("detail", sched_resp.text)
+                except Exception:
+                    err = sched_resp.text
+                raise RuntimeError(f"Failed to schedule campaign for audience {target_aud} ({sched_resp.status_code}): {err}")
+            status = "scheduled"
+        else:
+            send_url = f"https://{prefix}.api.mailchimp.com/3.0/campaigns/{campaign_id}/actions/send"
+            send_resp = session.post(send_url, timeout=20)
+            if send_resp.status_code not in (200, 204):
+                try:
+                    err = send_resp.json().get("detail", send_resp.text)
+                except Exception:
+                    err = send_resp.text
+                raise RuntimeError(f"Failed to send campaign for audience {target_aud} ({send_resp.status_code}): {err}")
+            status = "sent"
+
+        created_campaigns.append({
+            "campaign_id": campaign_id,
+            "web_id": web_id,
+            "audience_id": target_aud,
+            "mailchimp_url": f"https://admin.mailchimp.com/campaigns/edit?id={web_id}" if web_id else None,
+        })
+
+        if idx < len(target_audiences) - 1:
+            import time
+            time.sleep(0.3)
+
+    primary = created_campaigns[0]
+    row.mailchimp_campaign_id = ",".join(c["campaign_id"] for c in created_campaigns)
     row.mailchimp_status = status
     row.mailchimp_sent_at = now if status == "sent" else None
-    row.mailchimp_web_id = web_id
+    row.mailchimp_web_id = primary["web_id"]
     db.commit()
 
     return {
         "status": "ok",
-        "campaign_id": campaign_id,
-        "web_id": web_id,
+        "campaign_id": primary["campaign_id"],
+        "web_id": primary["web_id"],
+        "campaign_ids": [c["campaign_id"] for c in created_campaigns],
         "action": "draft" if draft_only else ("scheduled" if schedule_time_iso else "sent"),
         "mailchimp_status": status,
         "sent_at": now.isoformat() if status == "sent" else None,
-        "audience_id": target_audience,
+        "audience_id": target_audiences[0],
+        "audience_ids": target_audiences,
         "subject": campaign_subject,
-        "mailchimp_url": f"https://admin.mailchimp.com/campaigns/edit?id={web_id}" if web_id else None,
+        "mailchimp_url": primary.get("mailchimp_url"),
+        "audiences_count": len(target_audiences),
+        "campaigns": created_campaigns,
     }
 
 
