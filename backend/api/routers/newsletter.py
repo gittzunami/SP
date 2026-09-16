@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi import Path as FPath
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -50,6 +51,8 @@ async def webhook_google_news_response_json(
 
     try:
         result = handle_teams_submission(db, payload)
+        if result.get("status") == "error":
+            raise HTTPException(status_code=400, detail=result)
         return {"status": "ok", **result}
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -82,6 +85,8 @@ async def webhook_newsletter_action(
 
     try:
         result = handle_teams_submission(db, {**body, "action": action, "newsletter_id": newsletter_id})
+        if result.get("status") == "error":
+            raise HTTPException(status_code=400, detail=result)
         return {"status": "ok", **result}
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -151,6 +156,49 @@ def get_newsletter(newsletter_id: int = FPath(...), db: Session = Depends(get_db
     if not nl:
         raise HTTPException(404, f"Newsletter {newsletter_id} not found")
     return nl
+
+
+@router.get("/api/newsletters/{newsletter_id}/preview", response_class=HTMLResponse, tags=["Newsletter"])
+def preview_newsletter_html(
+    newsletter_id: int = FPath(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Renders and serves the complete, standalone HTML email for in-browser preview.
+    Does not require frontend React bundle — opens directly as an HTML document.
+    """
+    import json
+    import datetime
+    from db_models import GeneratedNewsletter
+    from services.mailchimp_service import render_newsletter_html
+
+    nl = db.query(GeneratedNewsletter).filter(GeneratedNewsletter.id == newsletter_id).first()
+    if not nl:
+        raise HTTPException(404, f"Newsletter {newsletter_id} not found")
+
+    try:
+        content_dict = json.loads(nl.content_json or "{}")
+    except Exception:
+        content_dict = {}
+
+    rendered = render_newsletter_html({
+        "title": nl.title or "TrendSense Newsletter",
+        "content": content_dict,
+    })
+
+    # For browser preview friendliness, replace merge tags with realistic values
+    year_str = str(datetime.datetime.now().year)
+    rendered = (
+        rendered
+        .replace("*|CURRENT_YEAR|*", year_str)
+        .replace("*|LIST:COMPANY|*", "Tzunami")
+        .replace("*|HTML:LIST_ADDRESS_HTML|*", "Tzunami Inc., Cloud Migration & Governance")
+        .replace("*|UNSUB|*", "#")
+        .replace("*|UPDATE_PROFILE|*", "#")
+        .replace("*|REWARDS|*", "")
+    )
+
+    return HTMLResponse(content=rendered, status_code=200)
 
 
 @router.delete("/api/newsletters/{newsletter_id}")

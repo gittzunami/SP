@@ -569,13 +569,10 @@ def create_and_send_campaign(
                 pass
 
     if not target_audiences:
-        # Fallback: query live Mailchimp API for audiences
-        audiences = get_audiences(key, prefix)
-        if audiences:
-            target_audiences = [audiences[0]["id"]]
-            logger.info("Auto-selected first Mailchimp audience: %s (%s)", audiences[0]["name"], target_audiences[0])
-        else:
-            raise ValueError("No Mailchimp Audience found. Please configure an audience in Manage Audiences.")
+        raise ValueError(
+            "No audience selected. Please configure at least one audience in "
+            "'Manage Audiences' on the Newsletter page, then select it before sending or drafting."
+        )
 
     sender_name = (
         from_name

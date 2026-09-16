@@ -201,48 +201,8 @@ def build_adaptive_card(job_id: str, keyword: str, article_count: int, articles:
                     "wrap": True,
                 })
 
-            snippet = (article.get("snippet") or article.get("description") or article.get("summary") or "").strip()
-            if snippet:
-                facts = []
-                if source:
-                    facts.append({"title": "Source:", "value": source})
-                if published:
-                    facts.append({"title": "Published:", "value": published[:10]})
-                kw_val = article.get("keyword") or article.get("search_query")
-                if kw_val:
-                    facts.append({"title": "Keyword:", "value": str(kw_val)})
 
-                article_body.append({
-                    "type": "ActionSet",
-                    "spacing": "Small",
-                    "actions": [
-                        {
-                            "type": "Action.ShowCard",
-                            "title": "🔍 Preview Snippet",
-                            "card": {
-                                "type": "AdaptiveCard",
-                                "body": [
-                                    {
-                                        "type": "TextBlock",
-                                        "text": "📝 **Article Excerpt**",
-                                        "weight": "Bolder",
-                                        "size": "Small",
-                                    },
-                                    {
-                                        "type": "TextBlock",
-                                        "text": snippet,
-                                        "wrap": True,
-                                        "isSubtle": True,
-                                    },
-                                    *(
-                                        [{"type": "FactSet", "facts": facts}]
-                                        if facts else []
-                                    ),
-                                ],
-                            },
-                        }
-                    ],
-                })
+
 
             body.append({
                 "type": "Container",
@@ -302,240 +262,10 @@ def build_adaptive_card(job_id: str, keyword: str, article_count: int, articles:
 
 def build_newsletter_teams_card(newsletter: Any, db: Any = None) -> dict:
     """
-    Builds an interactive Microsoft Teams Adaptive Card (v1.4) for a Generated Newsletter,
-    featuring:
-      - Newsletter Header, Subject & Snippet
-      - '👁️ Preview Content' (Action.ShowCard) displaying the full email body and CTA
-      - '🚀 Configure & Send' (Action.ShowCard) with editable fields & multi-select audience checkboxes
-      - '📝 Configure & Save Draft' (Action.ShowCard) with multi-select audience checkboxes
-      - '🌐 Open in Portal' (Action.OpenUrl)
+    Builds an interactive Microsoft Teams Adaptive Card (v1.4) for a Generated Newsletter.
+    Delegates to build_newsletter_action_adaptive_card.
     """
-    from db_models import UserPreferences, GeneratedNewsletter
-
-    if isinstance(newsletter, dict):
-        nl_id = newsletter.get("id")
-        title = newsletter.get("title") or "TrendSense Newsletter"
-        content = newsletter.get("content") or {}
-        if isinstance(content, str):
-            try:
-                content = json.loads(content)
-            except Exception:
-                content = {}
-        mailchimp_status = newsletter.get("mailchimp_status")
-    else:
-        nl_id = newsletter.id
-        title = newsletter.title or "TrendSense Newsletter"
-        try:
-            content = json.loads(newsletter.content_json or "{}")
-        except Exception:
-            content = {}
-        mailchimp_status = newsletter.mailchimp_status
-
-    frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173").rstrip("/")
-    portal_link = f"{frontend_url}/newsletter"
-
-    subject_line = str(content.get("email_subject_line") or title or "TrendSense Industry Digest").strip()
-    preview_snippet = str(content.get("preview_text") or (content.get("hook_paragraph") or "")[:120]).strip()
-    hook = str(content.get("hook_paragraph") or "").strip()
-    stat = str(content.get("stat_paragraph") or "").strip()
-    highlight_stat = str(content.get("highlight_stat") or "").strip()
-    context = str(content.get("context_paragraph") or "").strip()
-    solution = str(content.get("solution_paragraph") or "").strip()
-
-    # Load audience choices from DB UserPreferences
-    audience_choices = []
-    if db is not None:
-        try:
-            pref_row = db.query(UserPreferences).filter_by(key="mailchimp_custom_audiences").first()
-            if pref_row and pref_row.value:
-                custom_list = json.loads(pref_row.value)
-                for item in custom_list:
-                    if item.get("id"):
-                        audience_choices.append({
-                            "title": f"{item.get('name', item.get('id'))} ({item.get('id')})",
-                            "value": str(item.get("id")),
-                        })
-        except Exception as exc:
-            logger.warning("Could not load audience choices for Teams card: %s", exc)
-
-    if not audience_choices:
-        audience_choices = [{"title": "Default Database Audience", "value": "default"}]
-
-    default_choice_val = audience_choices[0]["value"] if audience_choices else ""
-
-    body = [
-        {
-            "type": "Container",
-            "style": "emphasis",
-            "items": [
-                {
-                    "type": "TextBlock",
-                    "text": f"📰 Newsletter #{nl_id}: {title}",
-                    "weight": "Bolder",
-                    "size": "Medium",
-                    "wrap": True,
-                },
-                {
-                    "type": "TextBlock",
-                    "text": f"**Subject:** {subject_line}\n\n**Preview:** {preview_snippet}",
-                    "wrap": True,
-                    "isSubtle": True,
-                },
-            ],
-        },
-    ]
-
-    actions = [
-        # 1. Expandable Preview Sub-Card
-        {
-            "type": "Action.ShowCard",
-            "title": "👁️ Preview Content",
-            "card": {
-                "type": "AdaptiveCard",
-                "body": [
-                    {
-                        "type": "TextBlock",
-                        "text": "📄 **Full Newsletter Content**",
-                        "weight": "Bolder",
-                        "size": "Medium",
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": f"**Hook:** {hook}",
-                        "wrap": True,
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": f"**Key Stat:** {highlight_stat}\n\n{stat}",
-                        "wrap": True,
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": f"**Context & Modernization:**\n{context}",
-                        "wrap": True,
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": f"**Solution:**\n{solution}",
-                        "wrap": True,
-                    },
-                    {
-                        "type": "Container",
-                        "style": "accent",
-                        "items": [
-                            {
-                                "type": "TextBlock",
-                                "text": "👉 **Schedule a discovery call** (https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call)",
-                                "wrap": True,
-                                "weight": "Bolder",
-                            }
-                        ],
-                    },
-                ],
-            },
-        },
-    ]
-
-    if mailchimp_status != "sent":
-        # 2. Configure & Send Campaign Sub-Card
-        actions.append({
-            "type": "Action.ShowCard",
-            "title": "🚀 Configure & Send",
-            "card": {
-                "type": "AdaptiveCard",
-                "body": [
-                    {
-                        "type": "TextBlock",
-                        "text": "📢 **Confirm Campaign Broadcast Details**",
-                        "weight": "Bolder",
-                        "size": "Medium",
-                    },
-                    {
-                        "type": "Input.Text",
-                        "id": "subject",
-                        "label": "Email Subject Line",
-                        "value": subject_line,
-                    },
-                    {
-                        "type": "Input.ChoiceSet",
-                        "id": "selected_audiences",
-                        "isMultiSelect": True,
-                        "style": "expanded",
-                        "label": "👥 Target Audience(s) (Select 1 or more):",
-                        "choices": audience_choices,
-                        "value": default_choice_val,
-                    },
-                ],
-                "actions": [
-                    {
-                        "type": "Action.Submit",
-                        "title": "🚀 Confirm & Broadcast Now",
-                        "style": "positive",
-                        "data": {
-                            "action": "newsletter_send",
-                            "newsletter_id": nl_id,
-                        },
-                    },
-                ],
-            },
-        })
-
-        # 3. Configure & Save Draft Sub-Card
-        actions.append({
-            "type": "Action.ShowCard",
-            "title": "📝 Configure & Save Draft",
-            "card": {
-                "type": "AdaptiveCard",
-                "body": [
-                    {
-                        "type": "TextBlock",
-                        "text": "📝 **Save Campaign as Mailchimp Draft**",
-                        "weight": "Bolder",
-                        "size": "Medium",
-                    },
-                    {
-                        "type": "Input.Text",
-                        "id": "subject",
-                        "label": "Draft Subject Line",
-                        "value": subject_line,
-                    },
-                    {
-                        "type": "Input.ChoiceSet",
-                        "id": "selected_audiences",
-                        "isMultiSelect": True,
-                        "style": "expanded",
-                        "label": "👥 Target Audience(s) (Select 1 or more):",
-                        "choices": audience_choices,
-                        "value": default_choice_val,
-                    },
-                ],
-                "actions": [
-                    {
-                        "type": "Action.Submit",
-                        "title": "💾 Save Draft in Mailchimp",
-                        "data": {
-                            "action": "newsletter_draft",
-                            "newsletter_id": nl_id,
-                        },
-                    },
-                ],
-            },
-        })
-
-    # 4. Deep link to Web Portal
-    actions.append({
-        "type": "Action.OpenUrl",
-        "title": "🌐 View in Portal",
-        "url": portal_link,
-    })
-
-    return {
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "type": "AdaptiveCard",
-        "version": "1.4",
-        "body": body,
-        "actions": actions,
-    }
+    return build_newsletter_action_adaptive_card(newsletter, db=db)
 
 
 class _SSLAdapter(HTTPAdapter):
@@ -645,25 +375,45 @@ def send_to_teams_webhook(job_id: str, keyword: str, article_count: int, article
 
 # ── Individual Generated Newsletter Adaptive Card Builder ─────────────────────
 
-def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = "") -> dict:
-    """
-    Build an individual Adaptive Card for a generated newsletter with 4 choices:
-      1. Action.OpenUrl -> '👁️ View Full Preview' (Opens full branded email in a new browser tab)
-      2. Action.OpenUrl -> '✏️ Edit in App' (Opens frontend directly in live edit mode)
-      3. Action.Submit  -> '📁 Save as Draft' (Creates Mailchimp draft without UI popup)
-      4. Action.Submit  -> '✈️ Send via Mailchimp' (Broadcasts via Mailchimp without UI popup)
-    """
-    f_url = (frontend_url or getattr(settings, "FRONTEND_URL", "") or "http://localhost:5173").rstrip("/")
-    nl_id = newsletter.get("id")
-    title = (newsletter.get("title") or "Generated Newsletter").strip()
-    article_date = newsletter.get("article_date") or ""
+# ── Individual Generated Newsletter Adaptive Card Builder ─────────────────────
 
-    content = newsletter.get("content") or {}
-    if isinstance(content, str):
+def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "", db: Any = None) -> dict:
+    """
+    Build an individual interactive Adaptive Card for a generated newsletter with 4 choices:
+      1. Action.OpenUrl  -> '👁️ View Full Preview' (Opens standalone HTML email preview in browser tab)
+      2. Action.OpenUrl  -> '✏️ Edit in App' (Opens frontend directly in live edit mode without double URLs)
+      3. Action.ShowCard -> '✈️ Send via Mailchimp' (Expands audience selection + broadcast confirmation)
+      4. Action.ShowCard -> '📁 Save as Draft' (Expands audience selection + save draft confirmation)
+    """
+    import re
+
+    if isinstance(newsletter, dict):
+        nl_id = newsletter.get("id")
+        title = (newsletter.get("title") or "Generated Newsletter").strip()
+        article_date = newsletter.get("article_date") or ""
+        content = newsletter.get("content") or {}
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except Exception:
+                content = {}
+        mailchimp_status = newsletter.get("mailchimp_status")
+    else:
+        nl_id = getattr(newsletter, "id", None)
+        title = (getattr(newsletter, "title", None) or "Generated Newsletter").strip()
+        article_date = getattr(newsletter, "article_date", "") or ""
         try:
-            content = json.loads(content)
+            content = json.loads(getattr(newsletter, "content_json", None) or "{}")
         except Exception:
             content = {}
+        mailchimp_status = getattr(newsletter, "mailchimp_status", None)
+
+    f_url = (frontend_url or getattr(settings, "FRONTEND_URL", "") or "http://localhost:5173").rstrip("/")
+    base_f_url = re.sub(r"/newsletter/?$", "", f_url).rstrip("/")
+    edit_url = f"{base_f_url}/newsletter?id={nl_id}&edit=true"
+
+    b_url = (getattr(settings, "BACKEND_URL", "") or "http://localhost:8000").rstrip("/")
+    preview_url = f"{b_url}/api/newsletters/{nl_id}/preview"
 
     hook = str(content.get("hook_paragraph") or "").strip()
     stat = str(content.get("stat_paragraph") or "").strip()
@@ -672,9 +422,25 @@ def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = 
     solution = str(content.get("solution_paragraph") or "").strip()
     cta_label = "👉 Schedule a discovery call"
     full_text = str(content.get("full_text") or "").strip()
+    subject_line = str(content.get("email_subject_line") or title or "TrendSense Industry Digest").strip()
+    preview_snippet = str(content.get("preview_text") or (content.get("hook_paragraph") or "")[:120]).strip()
 
-    preview_url = f"{f_url}/newsletter?id={nl_id}&preview=true"
-    edit_url = f"{f_url}/newsletter?id={nl_id}&edit=true"
+    # Load audience choices strictly from DB UserPreferences
+    audience_choices = []
+    if db is not None:
+        try:
+            from db_models import UserPreferences
+            pref_row = db.query(UserPreferences).filter_by(key="mailchimp_custom_audiences").first()
+            if pref_row and pref_row.value:
+                custom_list = json.loads(pref_row.value)
+                for item in custom_list:
+                    if item.get("id"):
+                        audience_choices.append({
+                            "title": f"{item.get('name', item.get('id'))} ({item.get('id')})",
+                            "value": str(item.get("id")),
+                        })
+        except Exception as exc:
+            logger.warning("Could not load audience choices for Teams card: %s", exc)
 
     body_items: list[dict] = [
         {
@@ -683,7 +449,7 @@ def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = 
             "items": [
                 {
                     "type": "TextBlock",
-                    "text": f"📰 **Newsletter #{nl_id}: [{title}]({preview_url})**",
+                    "text": f"📰 **Newsletter #{nl_id}: {title}**",
                     "weight": "Bolder",
                     "size": "Medium",
                     "wrap": True,
@@ -696,11 +462,18 @@ def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = 
                     "spacing": "None",
                     "wrap": True,
                 },
+                {
+                    "type": "TextBlock",
+                    "text": f"**Subject:** {subject_line}\n\n**Preview:** {preview_snippet}",
+                    "wrap": True,
+                    "isSubtle": True,
+                    "spacing": "Small",
+                },
             ],
         },
     ]
 
-    # Render clean continuous newsletter paragraphs without artificial debug headers
+    # Render clean continuous newsletter paragraphs
     if full_text:
         body_text = full_text[:1200]
     else:
@@ -735,25 +508,120 @@ def build_newsletter_action_adaptive_card(newsletter: dict, frontend_url: str = 
             "title": "✏️ Edit in App",
             "url": edit_url,
         },
-        {
-            "type": "Action.Submit",
-            "title": "📁 Save as Draft",
-            "style": "default",
-            "data": {
-                "action": "newsletter_draft",
-                "newsletter_id": nl_id,
-            },
-        },
-        {
-            "type": "Action.Submit",
-            "title": "✈️ Send via Mailchimp",
-            "style": "positive",
-            "data": {
-                "action": "newsletter_send",
-                "newsletter_id": nl_id,
-            },
-        },
     ]
+
+    if mailchimp_status == "sent":
+        body_items.append({
+            "type": "TextBlock",
+            "text": "🔒 **This newsletter has already been broadcasted via Mailchimp.** (Campaign locked)",
+            "isSubtle": True,
+            "color": "Good",
+            "weight": "Bolder",
+            "spacing": "Medium",
+        })
+    else:
+        # Configure & Send Sub-Card
+        send_card_items: list[dict] = [
+            {
+                "type": "TextBlock",
+                "text": "📢 **Confirm Campaign Broadcast Details**",
+                "weight": "Bolder",
+                "size": "Medium",
+            },
+            {
+                "type": "Input.Text",
+                "id": "subject",
+                "label": "Email Subject Line",
+                "value": subject_line,
+            },
+        ]
+        if audience_choices:
+            send_card_items.append({
+                "type": "Input.ChoiceSet",
+                "id": "selected_audiences",
+                "isMultiSelect": True,
+                "style": "expanded",
+                "label": "👥 Target Audience(s) (Select 1 or more):",
+                "choices": audience_choices,
+            })
+        else:
+            send_card_items.append({
+                "type": "TextBlock",
+                "text": "⚠️ *No audiences saved in DB. Go to Newsletter portal -> 'Manage Audiences' to add audience IDs before sending.*",
+                "color": "Warning",
+                "wrap": True,
+            })
+
+        actions.append({
+            "type": "Action.ShowCard",
+            "title": "✈️ Send via Mailchimp",
+            "card": {
+                "type": "AdaptiveCard",
+                "body": send_card_items,
+                "actions": [
+                    {
+                        "type": "Action.Submit",
+                        "title": "🚀 Confirm & Broadcast Now",
+                        "style": "positive",
+                        "data": {
+                            "action": "newsletter_send",
+                            "newsletter_id": nl_id,
+                        },
+                    },
+                ],
+            },
+        })
+
+        # Configure & Save Draft Sub-Card
+        draft_card_items: list[dict] = [
+            {
+                "type": "TextBlock",
+                "text": "📝 **Save Campaign as Mailchimp Draft**",
+                "weight": "Bolder",
+                "size": "Medium",
+            },
+            {
+                "type": "Input.Text",
+                "id": "subject",
+                "label": "Draft Subject Line",
+                "value": subject_line,
+            },
+        ]
+        if audience_choices:
+            draft_card_items.append({
+                "type": "Input.ChoiceSet",
+                "id": "selected_audiences",
+                "isMultiSelect": True,
+                "style": "expanded",
+                "label": "👥 Target Audience(s) (Select 1 or more):",
+                "choices": audience_choices,
+            })
+        else:
+            draft_card_items.append({
+                "type": "TextBlock",
+                "text": "⚠️ *No audiences saved in DB. Go to Newsletter portal -> 'Manage Audiences' to add audience IDs before drafting.*",
+                "color": "Warning",
+                "wrap": True,
+            })
+
+        actions.append({
+            "type": "Action.ShowCard",
+            "title": "📁 Save as Draft",
+            "card": {
+                "type": "AdaptiveCard",
+                "body": draft_card_items,
+                "actions": [
+                    {
+                        "type": "Action.Submit",
+                        "title": "💾 Save Draft in Mailchimp",
+                        "data": {
+                            "action": "newsletter_draft",
+                            "newsletter_id": nl_id,
+                        },
+                    },
+                ],
+            },
+        })
 
     return {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -779,7 +647,7 @@ def send_newsletter_cards_to_teams(db, newsletters: list[dict]) -> int:
 
     for idx, nl in enumerate(newsletters):
         try:
-            card = build_newsletter_action_adaptive_card(nl, frontend_url=frontend_url)
+            card = build_newsletter_action_adaptive_card(nl, frontend_url=frontend_url, db=db)
             payload = {"adaptiveCard": card}
             ok = _send_card_payload(payload, target_url)
             if ok:
@@ -1710,4 +1578,4 @@ def _newsletter_dict(n) -> dict:
         "mailchimp_sent_at": n.mailchimp_sent_at.isoformat() if getattr(n, "mailchimp_sent_at", None) else None,
         "mailchimp_web_id": getattr(n, "mailchimp_web_id", None),
         "created_at": n.created_at.isoformat() if n.created_at else None,
-    }
+    }

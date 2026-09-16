@@ -21,11 +21,12 @@ logger = logging.getLogger("auth")
 async def jwt_middleware(request: Request, call_next):
     path = request.url.path
 
-    # Always allow: CORS preflight, public paths, webhook callbacks
+    # Always allow: CORS preflight, public paths, webhook callbacks, and newsletter HTML preview
     if (
         request.method == "OPTIONS"
         or path in settings.AUTH_SKIP_EXACT
         or any(path.startswith(p) for p in settings.AUTH_SKIP_PREFIX)
+        or (path.startswith("/api/newsletters/") and path.endswith("/preview"))
     ):
         return await call_next(request)
 

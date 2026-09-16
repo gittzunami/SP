@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
 import { getPref, setPref } from "../core/api/preferences";
 import {
@@ -1565,6 +1566,10 @@ const Newsletter = () => {
     typeof window === "undefined" || window.innerWidth >= 960
   );
 
+  const [searchParams] = useSearchParams();
+  const idParam = searchParams.get("id");
+  const shouldEdit = searchParams.get("edit") === "true";
+
   // Load sidebar state from DB on mount
   useEffect(() => {
     getPref("nl_sidebar_open", null).then((val) => {
@@ -1589,6 +1594,11 @@ const Newsletter = () => {
         const list = data.newsletters || [];
         setNewsletters(list);
         setSelected(prev => {
+          if (idParam) {
+            const targetId = parseInt(idParam, 10);
+            const directMatch = list.find(n => n.id === targetId || String(n.id) === idParam || n.job_id === idParam);
+            if (directMatch) return directMatch;
+          }
           if (prev === null) return list.length > 0 ? list[0] : null;
           const updated = list.find(n => n.id === prev.id);
           return updated ?? prev;
@@ -1599,13 +1609,13 @@ const Newsletter = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [idParam]);
 
   useEffect(() => {
     fetchNewsletters();
     const id = setInterval(() => fetchNewsletters(true), 30_000);
     return () => clearInterval(id);
-  }, []);
+  }, [fetchNewsletters]);
 
   const handleDelete = async (id) => {
     try {
@@ -1638,69 +1648,54 @@ const Newsletter = () => {
   const [inspectAudience,   setInspectAudience]   = useState(null);
   const [snack,             setSnack]             = useState({ open: false, msg: "", severity: "success" });
 
-  // Deep-link from Teams Adaptive Card (e.g. /newsletters?id=123&preview=true or &edit=true)
-  const initialDeepLinkHandled = React.useRef(false);
+  // Deep-link from Teams Adaptive Card (e.g. /newsletter?id=123&edit=true)
+  const initialDeepLinkHandled = useRef(false);
   useEffect(() => {
-    if (initialDeepLinkHandled.current) return;
+    if (!idParam || initialDeepLinkHandled.current) return;
+    const targetId = parseInt(idParam, 10);
+    if (!targetId || isNaN(targetId)) return;
 
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const idParam = params.get("id");
-      const shouldEdit = params.get("edit") === "true";
-      const isPreview = params.get("preview") === "true";
-
-      if (!idParam) return;
-
-      const targetId = parseInt(idParam, 10);
-
-      const applySelection = (nl) => {
-        initialDeepLinkHandled.current = true;
-        setSelected(nl);
-        setEditedTitle(nl.title || "");
-        setEditedContent(nl.content || {});
-        if (shouldEdit) {
-          if (nl.mailchimp_status === "sent") {
-            setIsLiveEditing(false);
-            setSnack({
-              open: true,
-              msg: "This newsletter has already been broadcasted via Mailchimp and is locked in read-only mode to preserve campaign records.",
-              severity: "warning",
-            });
-          } else {
-            setIsLiveEditing(true);
-          }
-        } else if (isPreview) {
+    const applySelection = (nl) => {
+      initialDeepLinkHandled.current = true;
+      setSelected(nl);
+      setEditedTitle(nl.title || "");
+      setEditedContent(nl.content || {});
+      if (shouldEdit) {
+        if (nl.mailchimp_status === "sent") {
           setIsLiveEditing(false);
-        }
-      };
-
-      // 1. Try finding in already fetched list
-      if (newsletters.length > 0) {
-        const found = newsletters.find(
-          (n) => n.id === targetId || String(n.id) === idParam || n.job_id === idParam
-        );
-        if (found) {
-          applySelection(found);
-          return;
+          setSnack({
+            open: true,
+            msg: "This newsletter has already been broadcasted via Mailchimp and is locked in read-only mode to preserve campaign records.",
+            severity: "warning",
+          });
+        } else {
+          setIsLiveEditing(true);
         }
       }
+    };
 
-      // 2. Direct fallback API fetch if not found in list or list still loading
-      if (targetId && !isNaN(targetId)) {
-        apiFetch(`${API_BASE}/api/newsletters/${targetId}`)
-          .then((res) => (res.ok ? res.json() : null))
-          .then((nl) => {
-            if (nl && nl.id) {
-              setNewsletters((prev) => (prev.some((n) => n.id === nl.id) ? prev : [nl, ...prev]));
-              applySelection(nl);
-            }
-          })
-          .catch((err) => console.warn("Failed to fetch deep-linked newsletter:", err));
+    // 1. Try finding in already fetched list
+    if (newsletters.length > 0) {
+      const found = newsletters.find(
+        (n) => n.id === targetId || String(n.id) === idParam || n.job_id === idParam
+      );
+      if (found) {
+        applySelection(found);
+        return;
       }
-    } catch (e) {
-      console.warn("Deep-link param parse error:", e);
     }
-  }, [newsletters]);
+
+    // 2. Direct fallback API fetch if not found in list or list still loading
+    apiFetch(`${API_BASE}/api/newsletters/${targetId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((nl) => {
+        if (nl && nl.id) {
+          setNewsletters((prev) => (prev.some((n) => n.id === nl.id) ? prev : [nl, ...prev]));
+          applySelection(nl);
+        }
+      })
+      .catch((err) => console.warn("Failed to fetch deep-linked newsletter:", err));
+  }, [idParam, shouldEdit, newsletters]);
 
   useEffect(() => {
     if (selected && !isLiveEditing) {

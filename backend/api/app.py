@@ -52,7 +52,11 @@ async def lifespan(app: FastAPI):
     if database.SessionLocal is not None:
         try:
             db = database.SessionLocal()
-            swept = scrapers._sweep_stale_tasks(db, max_age_minutes=0)
+            swept = scrapers._sweep_stale_tasks(
+                db,
+                max_age_minutes=0,
+                reason="Task interrupted because the backend restarted before completion.",
+            )
             db.close()
             if swept:
                 logger.info("Startup sweep: marked %d stale task(s) from a previous run as failed", swept)

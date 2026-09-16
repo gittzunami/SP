@@ -100,6 +100,9 @@ function AppInner() {
                           <Route path="/results"      element={<Results />} />
                           <Route path="/trends"       element={<Trends />} />
                           <Route path="/newsletter"   element={<Newsletter />} />
+                          <Route path="/newsletter/*" element={<Newsletter />} />
+                          <Route path="/newsletters"  element={<Navigate to="/newsletter" replace />} />
+                          <Route path="/newsletter/newsletter" element={<Navigate to="/newsletter" replace />} />
                           <Route path="/cost"         element={<CostGovernance />} />
                           <Route path="/llm-config"   element={<LLMConfiguration />} />
                           <Route path="/smart-brain"  element={<SmartBrain />} />

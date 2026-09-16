@@ -39,16 +39,23 @@ router = APIRouter(tags=["Run"])
 # legitimately run long under heavy pagination/rate-limit backoff, and a
 # 50+-keyword auto-scrape batch is expected to take many hours end-to-end, so
 # this threshold must stay well above any realistic in-progress duration.
-_STALE_TASK_MAX_AGE_MINUTES = 240
+_STALE_TASK_MAX_AGE_MINUTES = 360
 
 
-def _sweep_stale_tasks(db=None, max_age_minutes: int = _STALE_TASK_MAX_AGE_MINUTES) -> int:
+def _sweep_stale_tasks(
+    db=None,
+    max_age_minutes: int = _STALE_TASK_MAX_AGE_MINUTES,
+    reason: str | None = None,
+) -> int:
     """Mark tasks stuck in queued/running past max_age_minutes as failed, both
     in the in-memory registry (drives the /api/status 'running' badge) and in
     the TaskHistory DB table (survives across process restarts). Returns the
     number of tasks swept."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
-    stale_msg = f"Stale task — no completion after {max_age_minutes} min, worker likely hung (marked failed by watchdog)"
+    stale_msg = reason or (
+        f"Stale task — no completion after {max_age_minutes} min, "
+        "worker likely hung (marked failed by watchdog)"
+    )
     swept = 0
 
     for t in state.task_registry.values():
