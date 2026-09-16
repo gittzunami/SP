@@ -530,7 +530,7 @@ def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "
             },
             {
                 "type": "Input.Text",
-                "id": "subject",
+                "id": "send_subject",
                 "label": "Email Subject Line",
                 "value": subject_line,
             },
@@ -538,7 +538,7 @@ def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "
         if audience_choices:
             send_card_items.append({
                 "type": "Input.ChoiceSet",
-                "id": "selected_audiences",
+                "id": "send_audiences",
                 "isMultiSelect": True,
                 "style": "expanded",
                 "label": "👥 Target Audience(s) (Select 1 or more):",
@@ -582,7 +582,7 @@ def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "
             },
             {
                 "type": "Input.Text",
-                "id": "subject",
+                "id": "draft_subject",
                 "label": "Draft Subject Line",
                 "value": subject_line,
             },
@@ -590,7 +590,7 @@ def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "
         if audience_choices:
             draft_card_items.append({
                 "type": "Input.ChoiceSet",
-                "id": "selected_audiences",
+                "id": "draft_audiences",
                 "isMultiSelect": True,
                 "style": "expanded",
                 "label": "👥 Target Audience(s) (Select 1 or more):",
@@ -1173,15 +1173,31 @@ def handle_teams_submission(db, raw_body: dict) -> dict:
         from db_models import GeneratedNewsletter
 
         is_draft = "draft" in action
-        # Extract audience selection and customized fields from Teams Adaptive Card payload
-        selected_aud_raw = raw_body.get("selected_audiences") or raw_body.get("audience_ids") or raw_body.get("audience_id")
+        # Extract audience selection and customized fields from Teams Adaptive Card payload.
+        # The card has two separate Send/Draft sub-cards (Action.ShowCard) with distinct
+        # field ids — Adaptive Cards rejects the whole card if two elements anywhere in it
+        # share an id, even across collapsed sub-cards, so only one of each pair is ever
+        # actually present depending on which sub-card the user submitted.
+        selected_aud_raw = (
+            raw_body.get("send_audiences")
+            or raw_body.get("draft_audiences")
+            or raw_body.get("selected_audiences")
+            or raw_body.get("audience_ids")
+            or raw_body.get("audience_id")
+        )
         target_audiences: list[str] = []
         if isinstance(selected_aud_raw, list):
             target_audiences = [str(a).strip() for a in selected_aud_raw if str(a).strip() and str(a).strip().lower() != "default"]
         elif isinstance(selected_aud_raw, str):
             target_audiences = [a.strip() for a in selected_aud_raw.split(",") if a.strip() and a.strip().lower() != "default"]
 
-        custom_subject = (raw_body.get("subject") or raw_body.get("custom_subject") or "").strip() or None
+        custom_subject = (
+            raw_body.get("send_subject")
+            or raw_body.get("draft_subject")
+            or raw_body.get("subject")
+            or raw_body.get("custom_subject")
+            or ""
+        ).strip() or None
         custom_preview = (raw_body.get("preview_text") or "").strip() or None
         custom_from_name = (raw_body.get("from_name") or "").strip() or None
         custom_from_email = (raw_body.get("from_email") or "").strip() or None
