@@ -23,15 +23,16 @@ class Settings:
     # Paths that bypass JWT check
     AUTH_SKIP_EXACT: frozenset = frozenset({
         "/api/auth/login", "/docs", "/openapi.json", "/redoc", "/", "/api/health",
+        "/preview",
     })
-    AUTH_SKIP_PREFIX: tuple = ("/webhook/", "/api/webhook/")
+    AUTH_SKIP_PREFIX: tuple = ("/webhook/", "/api/webhook/", "/public/", "/api/public/")
 
     # ── Budget ────────────────────────────────────────────────────────────────
     DEFAULT_MONTHLY_BUDGET_USD: float = float(os.environ.get("DEFAULT_MONTHLY_BUDGET_USD", "1000"))
     EMAIL_ALERT_THRESHOLD_PCT: int    = int(os.environ.get("EMAIL_ALERT_THRESHOLD_PCT", "77"))
 
     # ── SMTP alerts ───────────────────────────────────────────────────────────
-    ALERT_SMTP_HOST: str = os.environ.get("ALERT_SMTP_HOST", "smtp.gmail.com")
+    ALERT_SMTP_HOST: str = os.environ.get("ALERT_SMTP_HOST", "smtp.office365.com")
     ALERT_SMTP_PORT: int = int(os.environ.get("ALERT_SMTP_PORT", "587"))
     ALERT_SMTP_USER: str = os.environ.get("ALERT_SMTP_USER", "")
     ALERT_SMTP_PASS: str = os.environ.get("ALERT_SMTP_PASS", "")

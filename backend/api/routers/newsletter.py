@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from typing import Any, Dict
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -199,6 +200,65 @@ def preview_newsletter_html(
     )
 
     return HTMLResponse(content=rendered, status_code=200)
+
+
+@router.get("/api/public/preview", tags=["Newsletter"])
+def public_preview_newsletter(token: str | None = None):
+    """Return a short-lived public preview payload for the standalone /preview page."""
+    if not token:
+        raise HTTPException(status_code=400, detail="token is required")
+
+    from newsletter_service import get_public_preview_payload
+
+    payload = get_public_preview_payload(token)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Preview expired or not found")
+
+    if isinstance(payload, dict):
+        newsletter = payload
+    else:
+        newsletter = payload
+
+    if hasattr(newsletter, "content_json"):
+        try:
+            content = json.loads(newsletter.content_json or "{}")
+        except Exception:
+            content = {}
+        title = newsletter.title or "TrendSense Newsletter"
+        item = {
+            "title": title,
+            "content": content,
+            "html": "",
+        }
+    elif isinstance(newsletter, dict):
+        item = {**newsletter}
+        title = item.get("title") or "TrendSense Newsletter"
+        content = item.get("content") or {}
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except Exception:
+                content = {}
+        item["content"] = content
+        item["title"] = title
+    else:
+        raise HTTPException(status_code=404, detail="Invalid preview payload")
+
+    if not item.get("html"):
+        try:
+            from services.mailchimp_service import render_newsletter_html
+            item["html"] = render_newsletter_html({
+                "title": item.get("title", "TrendSense Newsletter"),
+                "content": item.get("content") or {},
+            })
+        except Exception:
+            item["html"] = ""
+
+    return {
+        "title": item.get("title") or "TrendSense Newsletter",
+        "content": item.get("content") or {},
+        "html": item.get("html") or "",
+    }
 
 
 @router.delete("/api/newsletters/{newsletter_id}")

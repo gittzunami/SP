@@ -329,7 +329,7 @@ def trigger_budget_alert(body: Dict[str, Any], db: Session = Depends(get_db)):
                     failed.append({"email": recipient, "error": str(exc)})
     except smtplib.SMTPAuthenticationError:
         return {"status": "smtp_auth_error",
-                "error": "Use a Google App Password, not your Gmail password."}
+                "error": "SMTP authentication failed. Check the Outlook account, password, and SMTP AUTH access."}
     except Exception as exc:
         return {"status": "smtp_error", "error": str(exc)}
 

@@ -17,6 +17,7 @@ import SmartBrain       from "./features/smart-brain";
 
 // ── Auth page (not a "feature" — no domain data) ─────────────────────────────
 import Login from "./Pages/Login";
+import NewsletterPreview from "./Pages/NewsletterPreview";
 
 // ── App-wide contexts (from core layer) ──────────────────────────────────────
 import { BudgetProvider }             from "./core/contexts";
@@ -50,6 +51,7 @@ function AppInner() {
       <Routes>
         {/* Public */}
         <Route path="/login" element={<Login />} />
+        <Route path="/preview" element={<NewsletterPreview />} />
 
         {/* Protected shell */}
         <Route

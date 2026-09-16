@@ -37,6 +37,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("newsletter_service")
 
 WEBHOOK_URL = getattr(settings, "WEBHOOK_URL", os.environ.get("WEBHOOK_URL", "")).rstrip("/")
+PUBLIC_PREVIEW_TOKENS: dict[str, dict[str, Any]] = {}
 
 
 # Values treated as "no data" — fields with these values are dropped
@@ -377,6 +378,39 @@ def send_to_teams_webhook(job_id: str, keyword: str, article_count: int, article
 
 # ── Individual Generated Newsletter Adaptive Card Builder ─────────────────────
 
+def create_public_preview_token(newsletter: Any) -> str:
+    """Create a short-lived public preview token for the current newsletter content."""
+    token = uuid.uuid4().hex
+    payload = {
+        "newsletter": newsletter,
+        "created_at": time.time(),
+        "expires_at": time.time() + 300,
+    }
+    PUBLIC_PREVIEW_TOKENS[token] = payload
+    return token
+
+
+def build_public_preview_url(frontend_url: str, newsletter: Any) -> str:
+    """Build a disposable public preview URL with no newsletter ID in the URL."""
+    f_url = (frontend_url or getattr(settings, "FRONTEND_URL", "") or "http://localhost:5173").rstrip("/")
+    token = create_public_preview_token(newsletter)
+    return f"{f_url}/preview?token={token}"
+
+
+def get_public_preview_payload(token: str) -> dict[str, Any] | None:
+    """Return a valid, unexpired preview payload or None."""
+    entry = PUBLIC_PREVIEW_TOKENS.get(token)
+    if not entry:
+        return None
+
+    expires_at = entry.get("expires_at", 0)
+    if time.time() > expires_at:
+        PUBLIC_PREVIEW_TOKENS.pop(token, None)
+        return None
+
+    return entry.get("newsletter")
+
+
 def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "", db: Any = None) -> dict:
     """
     Build an individual interactive Adaptive Card for a generated newsletter with 4 choices:
@@ -412,8 +446,7 @@ def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "
     base_f_url = re.sub(r"/newsletter/?$", "", f_url).rstrip("/")
     edit_url = f"{base_f_url}/newsletter?id={nl_id}&edit=true"
 
-    b_url = (getattr(settings, "BACKEND_URL", "") or "http://localhost:8000").rstrip("/")
-    preview_url = f"{b_url}/api/newsletters/{nl_id}/preview"
+    preview_url = build_public_preview_url(base_f_url, newsletter)
 
     hook = str(content.get("hook_paragraph") or "").strip()
     stat = str(content.get("stat_paragraph") or "").strip()
@@ -497,64 +530,11 @@ def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "
         "wrap": True,
     })
 
-    cta_url = str(content.get("cta_url") or getattr(settings, "NEWSLETTER_DEFAULT_CTA_URL", "")).strip()
-
-    # Full-preview body: mirrors the actual newsletter content (same fields used
-    # to render the real email) plus a genuine, clickable CTA button — shown
-    # inline via Action.ShowCard so it expands within Teams instead of
-    # navigating away to a browser tab. The standalone HTML preview URL is
-    # still offered inside it for anyone who wants the pixel-exact email render.
-    preview_body: list[dict] = [
-        {
-            "type": "TextBlock",
-            "text": f"📰 **{subject_line}**",
-            "weight": "Bolder",
-            "size": "Medium",
-            "wrap": True,
-        },
-    ]
-    if full_text:
-        preview_body.append({
-            "type": "TextBlock",
-            "text": full_text,
-            "wrap": True,
-            "spacing": "Small",
-        })
-    else:
-        if hook:
-            preview_body.append({"type": "TextBlock", "text": hook, "wrap": True, "spacing": "Small"})
-        if stat:
-            stat_text = stat
-            if highlight_stat and highlight_stat in stat:
-                stat_text = stat.replace(highlight_stat, f"**{highlight_stat}**")
-            preview_body.append({"type": "TextBlock", "text": stat_text, "wrap": True, "spacing": "Small", "color": "Attention"})
-        if context:
-            preview_body.append({"type": "TextBlock", "text": context, "wrap": True, "spacing": "Small"})
-        if solution:
-            preview_body.append({"type": "TextBlock", "text": solution, "wrap": True, "spacing": "Small"})
-
-    preview_actions = []
-    if cta_url:
-        preview_actions.append({
-            "type": "Action.OpenUrl",
-            "title": cta_label,
-            "url": cta_url,
-        })
-    preview_actions.append({
-        "type": "Action.OpenUrl",
-        "title": "🌐 Open Full Preview in Browser",
-        "url": preview_url,
-    })
-
     actions = [
         {
-            "type": "Action.ShowCard",
+            "type": "Action.OpenUrl",
             "title": "👁️ View Full Preview",
-            "card": {
-                "type": "AdaptiveCard",
-                "body": preview_body,
-                "actions": preview_actions,
-            },
+            "url": preview_url,
         },
         {
             "type": "Action.OpenUrl",

@@ -453,7 +453,7 @@ def _maybe_send_scraper_alert(db, tool: str, pct: float,
             logger.info("Tool alert skipped for %s (no emails configured yet)", tool)
             return
 
-        smtp_host = os.environ.get("ALERT_SMTP_HOST", "smtp.gmail.com")
+        smtp_host = os.environ.get("ALERT_SMTP_HOST", "smtp.office365.com")
         smtp_port = int(os.environ.get("ALERT_SMTP_PORT", "587"))
         smtp_user = os.environ.get("ALERT_SMTP_USER", "")
         smtp_pass = os.environ.get("ALERT_SMTP_PASS", "")
