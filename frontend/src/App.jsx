@@ -51,7 +51,7 @@ function AppInner() {
       <Routes>
         {/* Public */}
         <Route path="/login" element={<Login />} />
-        <Route path="/preview" element={<NewsletterPreview />} />
+        <Route path="/preview/:newsletterId" element={<NewsletterPreview />} />
 
         {/* Protected shell */}
         <Route

@@ -190,6 +190,69 @@ def get_audiences(
     return lists
 
 
+def get_audience_preview_details(
+    audience_id: Optional[str] = None,
+    api_key: Optional[str] = None,
+    server_prefix: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Fetch list metadata needed to render Mailchimp merge tags in a browser preview."""
+    key, prefix = get_mailchimp_credentials(api_key, server_prefix)
+    target_id = (audience_id or os.environ.get("MAILCHIMP_AUDIENCE_ID", "")).strip()
+    if not key or not target_id:
+        return {}
+
+    url = f"https://{prefix}.api.mailchimp.com/3.0/lists/{target_id}"
+    session = _get_auth_session(key)
+    try:
+        response = session.get(url, timeout=10)
+        if response.status_code != 200:
+            logger.warning("Could not load Mailchimp audience details for preview: %s", response.status_code)
+            return {}
+        data = response.json()
+        contact = data.get("contact") or {}
+        return {
+            "company": contact.get("company") or data.get("name") or "Tzunami",
+            "address": ", ".join(
+                part for part in (
+                    contact.get("address1"),
+                    contact.get("address2"),
+                    contact.get("city"),
+                    contact.get("state"),
+                    contact.get("zip"),
+                    contact.get("country"),
+                ) if part
+            ) or "Tzunami Inc., Cloud Migration & Governance",
+        }
+    except Exception as exc:
+        logger.warning("Mailchimp audience preview lookup failed: %s", exc)
+        return {}
+    finally:
+        session.close()
+
+
+def render_preview_merge_tags(rendered_html: str, audience_details: Optional[Dict[str, Any]] = None) -> str:
+    """Resolve Mailchimp-only merge tags for a local browser preview."""
+    import datetime
+    import html
+
+    details = audience_details or {}
+    replacements = {
+        "*|CURRENT_YEAR|*": str(datetime.datetime.now().year),
+        "*|LIST:COMPANY|*": str(details.get("company") or "Tzunami"),
+        "*|HTML:LIST_ADDRESS_HTML|*": str(details.get("address") or "Tzunami Inc., Cloud Migration & Governance"),
+        "*|LIST:ADDRESS|*": str(details.get("address") or "Tzunami Inc., Cloud Migration & Governance"),
+        "*|UNSUB|*": "#",
+        "*|UPDATE_PROFILE|*": "#",
+        "*|REWARDS|*": "",
+    }
+    for tag, value in replacements.items():
+        rendered_html = rendered_html.replace(tag, html.escape(value))
+
+    # Avoid exposing unresolved Mailchimp syntax in a local preview if a new tag is added later.
+    rendered_html = re.sub(r"\*\|[^|]+\|\*", "", rendered_html)
+    return rendered_html
+
+
 def get_audience_members(
     audience_id: str,
     status: Optional[str] = None,

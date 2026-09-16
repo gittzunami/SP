@@ -21,7 +21,6 @@ import ssl
 import subprocess
 import sys
 import time
-import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -37,7 +36,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger("newsletter_service")
 
 WEBHOOK_URL = getattr(settings, "WEBHOOK_URL", os.environ.get("WEBHOOK_URL", "")).rstrip("/")
-PUBLIC_PREVIEW_TOKENS: dict[str, dict[str, Any]] = {}
 
 
 # Values treated as "no data" — fields with these values are dropped
@@ -378,37 +376,11 @@ def send_to_teams_webhook(job_id: str, keyword: str, article_count: int, article
 
 # ── Individual Generated Newsletter Adaptive Card Builder ─────────────────────
 
-def create_public_preview_token(newsletter: Any) -> str:
-    """Create a short-lived public preview token for the current newsletter content."""
-    token = uuid.uuid4().hex
-    payload = {
-        "newsletter": newsletter,
-        "created_at": time.time(),
-        "expires_at": time.time() + 300,
-    }
-    PUBLIC_PREVIEW_TOKENS[token] = payload
-    return token
-
-
 def build_public_preview_url(frontend_url: str, newsletter: Any) -> str:
-    """Build a disposable public preview URL with no newsletter ID in the URL."""
+    """Build a permanent public preview URL for a newsletter ID."""
     f_url = (frontend_url or getattr(settings, "FRONTEND_URL", "") or "http://localhost:5173").rstrip("/")
-    token = create_public_preview_token(newsletter)
-    return f"{f_url}/preview?token={token}"
-
-
-def get_public_preview_payload(token: str) -> dict[str, Any] | None:
-    """Return a valid, unexpired preview payload or None."""
-    entry = PUBLIC_PREVIEW_TOKENS.get(token)
-    if not entry:
-        return None
-
-    expires_at = entry.get("expires_at", 0)
-    if time.time() > expires_at:
-        PUBLIC_PREVIEW_TOKENS.pop(token, None)
-        return None
-
-    return entry.get("newsletter")
+    newsletter_id = newsletter.get("id") if isinstance(newsletter, dict) else getattr(newsletter, "id", None)
+    return f"{f_url}/preview/{newsletter_id}"
 
 
 def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "", db: Any = None) -> dict:
