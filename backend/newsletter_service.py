@@ -497,11 +497,64 @@ def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "
         "wrap": True,
     })
 
+    cta_url = str(content.get("cta_url") or getattr(settings, "NEWSLETTER_DEFAULT_CTA_URL", "")).strip()
+
+    # Full-preview body: mirrors the actual newsletter content (same fields used
+    # to render the real email) plus a genuine, clickable CTA button — shown
+    # inline via Action.ShowCard so it expands within Teams instead of
+    # navigating away to a browser tab. The standalone HTML preview URL is
+    # still offered inside it for anyone who wants the pixel-exact email render.
+    preview_body: list[dict] = [
+        {
+            "type": "TextBlock",
+            "text": f"📰 **{subject_line}**",
+            "weight": "Bolder",
+            "size": "Medium",
+            "wrap": True,
+        },
+    ]
+    if full_text:
+        preview_body.append({
+            "type": "TextBlock",
+            "text": full_text,
+            "wrap": True,
+            "spacing": "Small",
+        })
+    else:
+        if hook:
+            preview_body.append({"type": "TextBlock", "text": hook, "wrap": True, "spacing": "Small"})
+        if stat:
+            stat_text = stat
+            if highlight_stat and highlight_stat in stat:
+                stat_text = stat.replace(highlight_stat, f"**{highlight_stat}**")
+            preview_body.append({"type": "TextBlock", "text": stat_text, "wrap": True, "spacing": "Small", "color": "Attention"})
+        if context:
+            preview_body.append({"type": "TextBlock", "text": context, "wrap": True, "spacing": "Small"})
+        if solution:
+            preview_body.append({"type": "TextBlock", "text": solution, "wrap": True, "spacing": "Small"})
+
+    preview_actions = []
+    if cta_url:
+        preview_actions.append({
+            "type": "Action.OpenUrl",
+            "title": cta_label,
+            "url": cta_url,
+        })
+    preview_actions.append({
+        "type": "Action.OpenUrl",
+        "title": "🌐 Open Full Preview in Browser",
+        "url": preview_url,
+    })
+
     actions = [
         {
-            "type": "Action.OpenUrl",
+            "type": "Action.ShowCard",
             "title": "👁️ View Full Preview",
-            "url": preview_url,
+            "card": {
+                "type": "AdaptiveCard",
+                "body": preview_body,
+                "actions": preview_actions,
+            },
         },
         {
             "type": "Action.OpenUrl",
