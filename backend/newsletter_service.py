@@ -21,6 +21,7 @@ import ssl
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
