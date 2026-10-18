@@ -43,21 +43,19 @@ import { useAppTheme }    from "../AppThemeContext";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
-// ── Static newsletter copy — Tzunami branding ────────────────────────────────
+// ── Static newsletter copy & asset URLs — Cloudsfer & Tzunami branding ───────
 const CTA_URL = "https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call";
-const CTA_LABEL = "👉 Schedule a discovery call";
+const CTA_LABEL = "Schedule a discovery call now";
 
-const SOCIAL_LINKS = [
-  { name: "Facebook", url: "https://www.facebook.com/TzunamiDeployer?locale=he_IL", icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-facebook-48.png" },
-  { name: "X",        url: "https://twitter.com/tzunami",                           icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-twitter-48.png" },
-  { name: "Website",  url: "https://tzunami.com/",                                  icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-link-48.png" },
-  { name: "LinkedIn", url: "https://www.linkedin.com/company/126996/admin/feed/posts/", icon: "https://cdn-images.mailchimp.com/icons/social-block-v2/color-linkedin-48.png" },
-];
+const CLOUDSFER_LOGO_URL = "https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/250b7315-d77b-bfcd-33bf-2c9ae0f7654e.png";
+const HEADER_BANNER_URL = "https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/cbfb4578-53af-c4de-2ecd-6be9d691cafa.png";
+const DIAGRAM_IMAGE_URL = "https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/e21ae689-3033-6ed3-508b-8daee09088ff.png";
+const CHATGPT_ICON_URL = "https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/44a6f208-f81a-4cdc-95b0-16b7544036c6.png";
+const GEMINI_ICON_URL = "https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/f6532a27-013d-71ec-0f16-e263fe6cf28e.png";
+const CLAUDE_ICON_URL = "https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/a8b7ef3d-9b9f-1890-a83f-5e16e1fecbdb.png";
 
-const FOOTER_COPYRIGHT = "Copyright ©️ 2024 Tzunami Inc. All rights reserved.";
-const FOOTER_ADDRESS   = "support@tzunami.com";
-const FOOTER_PREFS_URL = "#";
-const FOOTER_UNSUB_URL = "#";
+const FOOTER_COPYRIGHT = "Copyright © 2026 Cloudsfer / Tzunami Inc., All rights reserved.";
+const FOOTER_ADDRESS = "Tzunami Inc., Cloud Migration & Governance";
 
 const PROVIDER_COLORS = {
   openai:    "#10a37f",
@@ -69,250 +67,176 @@ const stripHtml = (s) => (s ? String(s).replace(/<[^>]+>/g, "").trim() : "");
 
 // ── Build Mailchimp-compatible inline-styled HTML for Gmail paste ──────────────
 function buildGmailHtml(newsletter) {
-  const c        = newsletter?.content || {};
-  const hook     = stripHtml(c.hook_paragraph || "");
-  const stat     = stripHtml(c.stat_paragraph || "");
-  const source   = stripHtml(c.source_name || "");
-  const sourceUrl= String(c.source_url || "#");
-  const highlight= stripHtml(c.highlight_stat || "");
-  const context  = stripHtml(c.context_paragraph || "");
-  const solution = stripHtml(c.solution_paragraph || "");
-  const ctaLabel = CTA_LABEL;
+  const c = newsletter?.content || {};
+  const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-  const esc = (s) => s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const rawHeadline = stripHtml(c.email_subject_line || c.headline || newsletter?.title || "Industry Watch Digest");
+  const headline = esc(rawHeadline.replace(/\s*—\s*\d{4}-\d{2}-\d{2}.*$/, "").trim() || rawHeadline);
 
-  // Replace stat in stat_paragraph with red-highlighted version
-  const highlightStat = (text, stat) => {
-    const cleanText = stripHtml(text);
-    const cleanStat = stripHtml(stat);
-    if (!cleanStat) return `<span style="font-size:18px">${esc(cleanText)}</span>`;
-    const escaped = cleanStat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = cleanText.split(new RegExp(`(${escaped})`, 'i'));
-    return parts.map(p => {
-      if (p.toLowerCase() === cleanStat.toLowerCase()) {
-        return `<span style="color:#B22222;font-weight:bold;">${esc(p)}</span>`;
-      }
-      return `<span style="font-size:18px">${esc(p)}</span>`;
-    }).join('');
-  };
+  const fullText = stripHtml(c.full_text || c.body_text || "");
+  let paragraphs = [];
+  if (fullText) {
+    paragraphs = fullText.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+  } else {
+    for (const k of ["hook_paragraph", "stat_paragraph", "context_paragraph", "solution_paragraph"]) {
+      const val = stripHtml(c[k] || "");
+      if (val) paragraphs.push(val);
+    }
+    if (paragraphs.length === 0) {
+      const fb = stripHtml(c.answer || c.analyst_note || c.description || "");
+      if (fb) paragraphs.push(fb);
+      else paragraphs.push("The latest developments and strategic insights in data security, cloud resilience, and governance.");
+    }
+  }
 
-  // Build social icons HTML
-  const socialIconsHtml = SOCIAL_LINKS.map(s => `
-    <td align="center" valign="top" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-      <!--[if mso]><td align="center" valign="top"><![endif]-->
-      <table align="left" border="0" cellpadding="0" cellspacing="0" style="display:inline;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;">
-        <tr>
-          <td valign="top" style="padding-right:10px;padding-bottom:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-              <tr>
-                <td align="left" valign="middle" style="padding-top:5px;padding-right:10px;padding-bottom:5px;padding-left:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                  <table align="left" border="0" cellpadding="0" cellspacing="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;">
-                    <tr>
-                      <td align="center" valign="middle" width="24" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                        <a href="${esc(s.url)}" target="_blank" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;"><img src="${esc(s.icon)}" alt="${esc(s.name)}" style="display:block;border:0;height:auto;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;" height="24" width="24"></a>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-      <!--[if mso]></td><![endif]-->
-    </td>`).join('');
+  const highlight = stripHtml(c.highlight_stat || "");
+  const bodyParasHtml = paragraphs.map(p => {
+    let inner = esc(p);
+    if (highlight && p.toLowerCase().includes(highlight.toLowerCase())) {
+      const escapedTarget = highlight.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const parts = p.split(new RegExp(`(${escapedTarget})`, "i"));
+      inner = parts.map(part => {
+        if (part.toLowerCase() === highlight.toLowerCase()) {
+          return `<span style="color:#7FA9E8;font-weight:bold;">${esc(part)}</span>`;
+        }
+        return esc(part);
+      }).join("");
+    }
+    return `<p style="margin:0 0 14px 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#F2F2F2;text-align:left;font-weight:normal;">${inner}</p>`;
+  }).join("\n");
 
-  return `
-<!doctype html>
+  return `<!doctype html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
-  <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${esc(newsletter.title || 'Tzunami Newsletter')}</title>
+    <head>
+        <meta charset="UTF-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>${headline}</title>
     <style type="text/css">
-      p{margin:10px 0;padding:0;}
-      table{border-collapse:collapse;}
-      h1,h2,h3,h4,h5,h6{display:block;margin:0;padding:0;}
-      img,a img{border:0;height:auto;outline:none;text-decoration:none;}
-      body,#bodyTable,#bodyCell{height:100%;margin:0;padding:0;width:100%;}
-      .mcnPreviewText{display:none !important;}
-      #outlook a{padding:0;}
-      img{-ms-interpolation-mode:bicubic;}
-      table{mso-table-lspace:0pt;mso-table-rspace:0pt;}
-      .ReadMsgBody{width:100%;}
-      .ExternalClass{width:100%;}
-      p,a,li,td,blockquote{mso-line-height-rule:exactly;}
-      a[href^=tel],a[href^=sms]{color:inherit;cursor:default;text-decoration:none;}
-      p,a,li,td,body,table,blockquote{-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;}
-      .ExternalClass,.ExternalClass p,.ExternalClass td,.ExternalClass div,.ExternalClass span,.ExternalClass font{line-height:100%;}
-      a[x-apple-data-detectors]{color:inherit !important;text-decoration:none !important;font-size:inherit !important;font-family:inherit !important;font-weight:inherit !important;line-height:inherit !important;}
-      .templateContainer{max-width:600px !important;}
-      a.mcnButton{display:block;}
-      .mcnImage,.mcnRetinaImage{vertical-align:bottom;}
-      .mcnTextContent{word-break:break-word;}
-      .mcnTextContent img{height:auto !important;}
-      .mcnDividerBlock{table-layout:fixed !important;}
-      h1{color:#222222;font-family:Helvetica;font-size:40px;font-style:normal;font-weight:bold;line-height:150%;letter-spacing:normal;text-align:left;}
-      h2{color:#222222;font-family:Helvetica;font-size:28px;font-style:normal;font-weight:bold;line-height:150%;letter-spacing:normal;text-align:left;}
-      h3{color:#444444;font-family:Helvetica;font-size:22px;font-style:normal;font-weight:bold;line-height:150%;letter-spacing:normal;text-align:left;}
-      h4{color:#949494;font-family:Georgia;font-size:20px;font-style:italic;font-weight:normal;line-height:125%;letter-spacing:normal;text-align:left;}
-      #templateHeader{background-color:#F7F7F7;background-image:none;background-repeat:no-repeat;background-position:50% 50%;background-size:cover;border-top:0;border-bottom:0;padding-top:0px;padding-bottom:0px;}
-      .headerContainer{background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;}
-      .headerContainer .mcnTextContent,.headerContainer .mcnTextContent p{color:#757575;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;}
-      .headerContainer .mcnTextContent a,.headerContainer .mcnTextContent p a{color:#007C89;font-weight:normal;text-decoration:underline;}
-      #templateBody{background-color:#FFFFFF;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:66px;padding-bottom:66px;}
-      .bodyContainer{background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;}
-      .bodyContainer .mcnTextContent,.bodyContainer .mcnTextContent p{color:#757575;font-family:Helvetica;font-size:16px;line-height:150%;text-align:left;}
-      .bodyContainer .mcnTextContent a,.bodyContainer .mcnTextContent p a{color:#007C89;font-weight:normal;text-decoration:underline;}
-      #templateFooter{background-color:#333333;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0px;padding-bottom:0px;}
-      .footerContainer{background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;}
-      .footerContainer .mcnTextContent,.footerContainer .mcnTextContent p{color:#FFFFFF;font-family:Helvetica;font-size:12px;line-height:150%;text-align:center;}
-      .footerContainer .mcnTextContent a,.footerContainer .mcnTextContent p a{color:#FFFFFF;font-weight:normal;text-decoration:underline;}
-      @media only screen and (min-width:768px){.templateContainer{width:600px !important;}}
-      @media only screen and (max-width:480px){body,table,td,p,a,li,blockquote{-webkit-text-size-adjust:none !important;}}
-      @media only screen and (max-width:480px){body{width:100% !important;min-width:100% !important;}}
-      @media only screen and (max-width:480px){.mcnRetinaImage{max-width:100% !important;}}
-      @media only screen and (max-width:480px){.mcnImage{width:100% !important;}}
-      @media only screen and (max-width:480px){.mcnTextContent,.mcnBoxedTextContentColumn{padding-right:18px !important;padding-left:18px !important;}}
+		p{margin:10px 0;padding:0;}
+		table{border-collapse:collapse;}
+		h1,h2,h3,h4,h5,h6{display:block;margin:0;padding:0;}
+		img,a img{border:0;height:auto;outline:none;text-decoration:none;}
+		body,#bodyTable,#bodyCell{height:100%;margin:0;padding:0;width:100%;}
+		.templateContainer{max-width:600px !important;}
+		body,#bodyTable{background-color:#FAFAFA;}
+		@media only screen and (min-width:768px){.templateContainer{width:600px !important;}}
+		@media only screen and (max-width: 480px){
+			body,table,td,p,a,li,blockquote{-webkit-text-size-adjust:none !important;}
+			body{width:100% !important;min-width:100% !important;}
+			h1{font-size:22px !important;line-height:125% !important;}
+		}
     </style>
-  </head>
-  <body style="height:100%;margin:0;padding:0;width:100%;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-    <span class="mcnPreviewText" style="display:none;font-size:0px;line-height:0px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;visibility:hidden;mso-hide:all;">${esc(hook.substring(0, 150))}</span>
-    <center>
-      <table align="center" border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" id="bodyTable" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;height:100%;margin:0;padding:0;width:100%;">
-        <tr>
-          <td align="center" valign="top" id="bodyCell" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;height:100%;margin:0;padding:0;width:100%;">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-              <!-- HEADER -->
-              <tr>
-                <td align="center" valign="top" id="templateHeader" style="background:#F7F7F7 none no-repeat 50% 50%/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:#F7F7F7;background-image:none;background-repeat:no-repeat;background-position:50% 50%;background-size:cover;border-top:0;border-bottom:0;padding-top:0px;padding-bottom:0px;">
-                  <!--[if (gte mso 9)|(IE)]><table align="center" border="0" cellspacing="0" cellpadding="0" width="600" style="width:600px;"><tr><td align="center" valign="top" width="600" style="width:600px;"><![endif]-->
-                  <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" class="templateContainer" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;max-width:600px !important;">
-                    <tr>
-                      <td valign="top" class="headerContainer" style="background:transparent none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;"></td>
-                    </tr>
-                  </table>
-                  <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
-                </td>
-              </tr>
-              <!-- BODY -->
-              <tr>
-                <td align="center" valign="top" id="templateBody" style="background:#FFFFFF none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:#FFFFFF;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:66px;padding-bottom:66px;">
-                  <!--[if (gte mso 9)|(IE)]><table align="center" border="0" cellspacing="0" cellpadding="0" width="600" style="width:600px;"><tr><td align="center" valign="top" width="600" style="width:600px;"><![endif]-->
-                  <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" class="templateContainer" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;max-width:600px !important;">
-                    <tr>
-                      <td valign="top" class="bodyContainer" style="background:transparent none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;">
-                        <!-- Text Block -->
-                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                          <tr>
-                            <td valign="top" style="padding-top:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                              <table align="left" border="0" cellpadding="0" cellspacing="0" style="max-width:100%;min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;" width="100%" class="mcnTextContentContainer">
-                                <tr>
-                                    ${(() => {
-                                      const ft = String(c.full_text || c.body_text || "").trim();
-                                      if (ft) {
-                                        return ft.split(/\n\s*\n/).filter(Boolean).map(p =>
-                                          `<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:160%;text-align:left;">${highlightStat(p, highlight)}</p>`
-                                        ).join('');
-                                      }
-                                      return [
-                                        hook ? `<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">${esc(hook)}</span></p>` : '',
-                                        stat ? `<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:160%;text-align:left;">${highlightStat(stat, highlight)}</p>` : '',
-                                        context ? `<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">${esc(context)}</span></p>` : '',
-                                        solution ? `<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;font-family:Helvetica;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">${esc(solution)}</span></p>` : '',
-                                      ].filter(Boolean).join('');
-                                    })()}
-
-                                </tr>
-                              </table>
-                            </td>
-                          </tr>
-                        </table>
-                        <!-- CTA Button -->
-                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                          <tr>
-                            <td style="padding-top:0;padding-right:18px;padding-bottom:18px;padding-left:18px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;" valign="top" align="center">
-                              <table border="0" cellpadding="0" cellspacing="0" style="border-collapse:separate !important;border-radius:26px;background-color:#2BAADF;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                                <tr>
-                                  <td align="center" valign="middle" style="font-family:Arial;font-size:16px;padding:18px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                                    <a class="mcnButton" title="${esc(ctaLabel)}" href="${esc(CTA_URL)}" target="_blank" style="font-weight:bold;letter-spacing:normal;line-height:100%;text-align:center;text-decoration:none;color:#FFFFFF;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;display:block;">${esc(ctaLabel)}</a>
-                                  </td>
-                                </tr>
-                              </table>
-                            </td>
-                          </tr>
-                        </table>
-                        <!-- Social Bar -->
-                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                          <tr>
-                            <td align="center" valign="top" style="padding:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                              <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;background-color:#31AFE2;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                                <tr>
-                                  <td align="center" valign="top" style="padding-top:9px;padding-right:9px;padding-left:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                                    <table align="center" border="0" cellpadding="0" cellspacing="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                                      <tr>
-                                        ${socialIconsHtml}
-                                      </tr>
+    </head>
+    <body style="margin:0;padding:0;background-color:#FAFAFA;">
+        <center>
+            <table align="center" border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" id="bodyTable" style="background-color:#FAFAFA;">
+                <tr>
+                    <td align="center" valign="top" id="bodyCell" style="padding:10px;">
+                        <table border="0" cellpadding="0" cellspacing="0" width="100%" class="templateContainer" style="max-width:600px;">
+                            <tr>
+                                <td valign="top" id="templatePreheader" style="background-color:#FAFAFA;padding:9px 0;">
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                        <tr>
+                                            <td valign="top" style="text-align:center;">
+                                                <a href="https://www.cloudsfer.com/?utm_source=mailchimp&utm_medium=email&utm_campaign=cloudsfer-brief&utm_content=logo" target="_blank">
+                                                    <img align="center" alt="Cloudsfer" src="${CLOUDSFER_LOGO_URL}" width="564" style="max-width:1128px;display:inline-block;vertical-align:bottom;border:0;" />
+                                                </a>
+                                            </td>
+                                        </tr>
                                     </table>
-                                  </td>
-                                </tr>
-                              </table>
-                            </td>
-                          </tr>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td valign="top" id="templateHeader" style="background-color:#FFFFFF;padding:9px 0 0 0;">
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                        <tr>
+                                            <td valign="top" style="text-align:center;">
+                                                <img align="center" alt="Industry Watch" src="${HEADER_BANNER_URL}" width="564" style="max-width:1128px;display:inline-block;vertical-align:bottom;border:0;" />
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td valign="top" id="templateBody" style="background-color:#FFFFFF;padding:0 0 9px 0;">
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                        <tr>
+                                            <td style="padding:9px 18px;">
+                                                <table border="0" cellspacing="0" width="100%" style="background-color:#002551;border-radius:4px;">
+                                                    <tr>
+                                                        <td style="padding:22px 18px;text-align:left;">
+                                                            <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#7FA9E8;margin-bottom:12px;">INDUSTRY WATCH</div>
+                                                            <h1 style="margin:0 0 14px 0;font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:1.2;font-weight:700;color:#FFFFFF;letter-spacing:-0.5px;text-align:left;">${headline}</h1>
+                                                            ${bodyParasHtml}
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                        <tr>
+                                            <td valign="top" style="padding:9px;text-align:center;">
+                                                <img align="center" alt="Cloudsfer Backup Workflow" src="${DIAGRAM_IMAGE_URL}" width="564" style="max-width:1128px;display:inline-block;vertical-align:bottom;border:0;" />
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td valign="top" id="templateFooter" style="background-color:#FAFAFA;padding:9px 0;">
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                        <tr>
+                                            <td style="padding:0 18px 18px 18px;" align="center">
+                                                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:separate;border-radius:4px;background-color:#002551;">
+                                                    <tr>
+                                                        <td align="center" valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:16px;padding:18px;">
+                                                            <a title="${CTA_LABEL}" href="${CTA_URL}" target="_blank" style="font-weight:bold;letter-spacing:normal;line-height:100%;text-align:center;text-decoration:none;color:#FFFFFF;display:block;">${CTA_LABEL}</a>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                        <tr>
+                                            <td style="padding:0 18px 9px 18px;text-align:center;">
+                                                <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#002551;margin-bottom:12px;">Ask AI about Cloudsfer</div>
+                                                <div style="text-align:center;">
+                                                    <a href="https://chatgpt.com/?q=How%20does%20Cloudsfer%20protect%20business%20data%3F" style="display:inline-block;margin:0 4px 8px 4px;padding:8px 16px 8px 10px;background-color:#FFFFFF;border:1px solid #D6E4F5;border-radius:999px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#002551;text-decoration:none;" target="_blank"><img alt="" height="20" src="${CHATGPT_ICON_URL}" style="display:inline-block;width:20px;height:20px;border:0;vertical-align:middle;margin-right:8px;" width="20" />ChatGPT</a>
+                                                    <a href="https://www.google.com/search?udm=50&q=How%20does%20Cloudsfer%20protect%20business%20data%3F" style="display:inline-block;margin:0 4px 8px 4px;padding:8px 16px 8px 10px;background-color:#FFFFFF;border:1px solid #D6E4F5;border-radius:999px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#002551;text-decoration:none;" target="_blank"><img alt="" height="20" src="${GEMINI_ICON_URL}" style="display:inline-block;width:20px;height:20px;border:0;vertical-align:middle;margin-right:8px;" width="20" />Gemini</a>
+                                                    <a href="https://claude.ai/new?q=How%20does%20Cloudsfer%20protect%20business%20data%3F" style="display:inline-block;margin:0 4px 8px 4px;padding:8px 16px 8px 10px;background-color:#FFFFFF;border:1px solid #D6E4F5;border-radius:999px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#002551;text-decoration:none;" target="_blank"><img alt="" height="20" src="${CLAUDE_ICON_URL}" style="display:inline-block;width:20px;height:20px;border:0;vertical-align:middle;margin-right:8px;" width="20" />Claude</a>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                        <tr>
+                                            <td style="padding:10px 18px 25px;">
+                                                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-top:2px solid #EEEEEE;">
+                                                    <tr><td><span></span></td></tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                        <tr>
+                                            <td style="padding:0 18px 9px 18px;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:150%;color:#656565;text-align:center;">
+                                                <em>${FOOTER_COPYRIGHT}</em><br />
+                                                <strong>Our mailing address is:</strong><br />
+                                                ${FOOTER_ADDRESS}
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
                         </table>
-                        <!-- Divider -->
-                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;table-layout:fixed !important;">
-                          <tr>
-                            <td style="min-width:100%;padding:18px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                              <table class="mcnDividerContent" border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                                <tr><td style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;"><span></span></td></tr>
-                              </table>
-                            </td>
-                          </tr>
-                        </table>
-                      </td>
-                    </tr>
-                  </table>
-                  <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
-                </td>
-              </tr>
-              <!-- FOOTER -->
-              <tr>
-                <td align="center" valign="top" id="templateFooter" style="background:#333333 none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:#333333;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0px;padding-bottom:0px;">
-                  <!--[if (gte mso 9)|(IE)]><table align="center" border="0" cellspacing="0" cellpadding="0" width="600" style="width:600px;"><tr><td align="center" valign="top" width="600" style="width:600px;"><![endif]-->
-                  <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" class="templateContainer" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;max-width:600px !important;">
-                    <tr>
-                      <td valign="top" class="footerContainer" style="background:transparent none no-repeat center/cover;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:transparent;background-image:none;background-repeat:no-repeat;background-position:center;background-size:cover;border-top:0;border-bottom:0;padding-top:0;padding-bottom:0;">
-                        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                          <tr>
-                            <td valign="top" style="padding-top:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                              <table align="left" border="0" cellpadding="0" cellspacing="0" style="max-width:100%;min-width:100%;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;" width="100%">
-                                <tr>
-                                  <td valign="top" style="padding-top:0;padding-right:18px;padding-bottom:9px;padding-left:18px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;word-break:break-word;color:#FFFFFF;font-family:Helvetica;font-size:12px;line-height:150%;text-align:center;">
-                                    <em>${esc(FOOTER_COPYRIGHT)}</em><br><br>
-                                    <strong>Our mailing address is:</strong><br>
-                                    ${esc(FOOTER_ADDRESS)}<br><br>
-                                    Want to change how you receive these emails?<br>
-                                    You can <a href="${esc(FOOTER_PREFS_URL)}" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;color:#FFFFFF;font-weight:normal;text-decoration:underline;">update your preferences</a> or <a href="${esc(FOOTER_UNSUB_URL)}" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;color:#FFFFFF;font-weight:normal;text-decoration:underline;">unsubscribe from this list</a>.
-                                  </td>
-                                </tr>
-                              </table>
-                            </td>
-                          </tr>
-                        </table>
-                      </td>
-                    </tr>
-                  </table>
-                  <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
-                </td>
-              </tr>
+                    </td>
+                </tr>
             </table>
-          </td>
-        </tr>
-      </table>
-    </center>
-  </body>
+        </center>
+    </body>
 </html>`.trim();
 }
 
@@ -362,7 +286,7 @@ const CopyButton = ({ newsletter }) => {
   );
 };
 
-// ── Newsletter preview — Tzunami branded email-style template ──────────────────
+// ── Newsletter preview — Cloudsfer & Tzunami email-style template ─────────────
 const RenderedNewsletter = ({
   newsletter,
   isEditing = false,
@@ -383,18 +307,18 @@ const RenderedNewsletter = ({
       stripHtml(c.context_paragraph),
       stripHtml(c.solution_paragraph),
     ].filter(Boolean);
-    return parts.join("\n\n");
+    if (parts.length > 0) return parts.join("\n\n");
+    const fallback = stripHtml(c.answer || c.analyst_note || c.description || "");
+    return fallback || "The latest developments and strategic insights in data security, cloud resilience, and governance.";
   };
 
   const fullText = getFullText();
   const highlight = stripHtml(c.highlight_stat || "");
 
-  // Legacy format detection
-  const question = c.question || c.headline || null;
-  const answer   = c.answer   || c.analyst_note || null;
-  const isLegacy = !c.hook_paragraph && !c.full_text && (question || c.headline || c.sections?.length);
+  const rawHeadline = stripHtml(c.email_subject_line || c.headline || newsletter?.title || "Industry Watch Digest");
+  const headline = rawHeadline.replace(/\s*—\s*\d{4}-\d{2}-\d{2}.*$/, "").trim() || rawHeadline;
 
-  // Highlight stat in red within text
+  // Highlight stat within text
   const renderStatWithHighlight = (text, stat) => {
     const cleanText = stripHtml(text);
     const cleanStat = stripHtml(stat);
@@ -402,9 +326,20 @@ const RenderedNewsletter = ({
     const parts = cleanText.split(new RegExp(`(${cleanStat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i'));
     return parts.map((p, i) =>
       p.toLowerCase() === cleanStat.toLowerCase()
-        ? <Box key={i} component="span" sx={{ color: "#B22222", fontWeight: "bold" }}>{p}</Box>
+        ? <Box key={i} component="span" sx={{ color: "#7FA9E8", fontWeight: "bold" }}>{p}</Box>
         : p
     );
+  };
+
+  const handleHeadlineChange = (e) => {
+    const val = e.target.value;
+    if (onContentChange) {
+      onContentChange({
+        ...c,
+        headline: val,
+        email_subject_line: val,
+      });
+    }
   };
 
   const handleTextChange = (e) => {
@@ -425,9 +360,17 @@ const RenderedNewsletter = ({
   const paragraphs = fullText.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
 
   return (
-    <Box sx={{ bgcolor: "white", p: { xs: 2, md: 3 }, borderRadius: 1, color: "black",
-      maxWidth: 560, mx: "auto", position: "relative" }}>
-
+    <Box sx={{
+      bgcolor: "#FAFAFA",
+      p: 0,
+      borderRadius: 2,
+      border: "1px solid #e2e8f0",
+      maxWidth: 600,
+      mx: "auto",
+      position: "relative",
+      overflow: "hidden",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+    }}>
       {/* Live Editing Header Controls */}
       {isEditing && (
         <Box sx={{
@@ -435,17 +378,15 @@ const RenderedNewsletter = ({
           alignItems: "center",
           justifyContent: "space-between",
           bgcolor: "#eff6ff",
-          border: "1px solid #bfdbfe",
-          borderRadius: 1.5,
-          p: 1.25,
-          mb: 2,
+          borderBottom: "1px solid #bfdbfe",
+          p: 1.5,
           flexWrap: "wrap",
           gap: 1,
         }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <EditIcon sx={{ color: "#2563eb", fontSize: 18 }} />
             <Typography sx={{ color: "#1e40af", fontWeight: 700, fontSize: "0.82rem" }}>
-              Live Edit Mode — Edit entire newsletter text directly below
+              Live Edit Mode — Edit headline and newsletter copy directly below
             </Typography>
           </Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
@@ -470,71 +411,136 @@ const RenderedNewsletter = ({
         </Box>
       )}
 
-      {/* Top rule */}
-      <Box sx={{ borderTop: "2px solid #dddddd", mb: 2 }} />
-
-      {isLegacy ? (
-        /* ── Legacy format fallback ── */
-        <Box>
-          <Typography sx={{ fontWeight: 800, fontSize: "1.1rem", color: "#1e293b", mb: 0.5 }}>
-            {c.headline}
-          </Typography>
-          {c.analyst_note && (
-            <Typography variant="body2" sx={{ color: "#374151", lineHeight: 1.6, mt: 1.5, fontSize: "0.82rem" }}>
-              {c.analyst_note}
-            </Typography>
-          )}
-          {(c.sections || []).map((s, si) => (
-            <Box key={si} sx={{ mt: 2 }}>
-              <Typography sx={{ fontWeight: 700, color: "#1e293b", mb: 0.5, fontSize: "0.85rem" }}>{s.title}</Typography>
-              {(s.stories || []).map((st, i) => (
-                <Box key={i} sx={{ mb: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, fontSize: "0.78rem" }}>{st.title}</Typography>
-                  <Typography variant="body2" sx={{ color: "#374151", fontSize: "0.75rem" }}>{st.summary}</Typography>
-                </Box>
-              ))}
-            </Box>
-          ))}
+      {/* Preheader with Cloudsfer Logo */}
+      <Box sx={{ bgcolor: "#FAFAFA", py: 1.5, px: 2, textAlign: "center" }}>
+        <Box
+          component="a"
+          href="https://www.cloudsfer.com/?utm_source=mailchimp&utm_medium=email&utm_campaign=cloudsfer-brief&utm_content=logo"
+          target="_blank"
+          rel="noopener noreferrer"
+          sx={{ display: "inline-block" }}
+        >
+          <Box
+            component="img"
+            src={CLOUDSFER_LOGO_URL}
+            alt="Cloudsfer"
+            sx={{ maxWidth: "100%", width: 564, height: "auto", display: "inline-block", verticalAlign: "bottom" }}
+          />
         </Box>
-      ) : (
-        /* ── New Tzunami format ── */
-        <>
-          {/* Unified Newsletter Content: Single Continuous Document */}
+      </Box>
+
+      {/* Header Banner Image */}
+      <Box sx={{ bgcolor: "#FFFFFF", pt: 1, px: 0, textAlign: "center" }}>
+        <Box
+          component="img"
+          src={HEADER_BANNER_URL}
+          alt="Industry Watch"
+          sx={{ width: "100%", maxWidth: 600, height: "auto", display: "block", mx: "auto" }}
+        />
+      </Box>
+
+      {/* Body: Dark Navy Feature Block */}
+      <Box sx={{ bgcolor: "#FFFFFF", py: 1, px: { xs: 1.5, sm: 2.25 } }}>
+        <Box sx={{
+          bgcolor: "#002551",
+          borderRadius: 1,
+          p: { xs: 2, sm: 2.5 },
+          color: "#F2F2F2",
+          textAlign: "left",
+        }}>
+          {/* Static Category Badge */}
+          <Box sx={{
+            fontFamily: "Arial, Helvetica, sans-serif",
+            fontSize: "12px",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.8px",
+            color: "#7FA9E8",
+            mb: 1.25,
+          }}>
+            INDUSTRY WATCH
+          </Box>
+
+          {/* Headline ($H_1$) */}
           {isEditing ? (
             <Box sx={{ mb: 2 }}>
-              <TextareaAutosize
-                minRows={12}
-                value={fullText}
-                onChange={handleTextChange}
-                placeholder="Write or edit the newsletter text here..."
-                style={{
-                  width: "100%",
-                  fontFamily: "Helvetica, Arial, sans-serif",
-                  fontSize: "0.92rem",
-                  lineHeight: "1.65",
-                  color: "#222222",
-                  backgroundColor: "#f8fafc",
-                  border: "1.5px solid #3b82f6",
-                  borderRadius: "6px",
-                  padding: "14px 16px",
-                  outline: "none",
-                  boxSizing: "border-box",
-                  resize: "vertical",
-                  boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.12)",
+              <Typography variant="caption" sx={{ color: "#93c5fd", fontWeight: 600, mb: 0.5, display: "block" }}>
+                Headline / Title:
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                value={headline}
+                onChange={handleHeadlineChange}
+                placeholder="Enter headline..."
+                sx={{
+                  "& .MuiOutlinedInput-root": {
+                    bgcolor: "#001b3d",
+                    color: "#FFFFFF",
+                    fontWeight: 700,
+                    fontSize: "1.05rem",
+                    "& fieldset": { borderColor: "#3b82f6" },
+                    "&:hover fieldset": { borderColor: "#60a5fa" },
+                  },
                 }}
               />
             </Box>
           ) : (
-            <Box sx={{ mb: 2 }}>
+            <Typography sx={{
+              fontFamily: "Arial, Helvetica, sans-serif",
+              fontSize: { xs: "1.25rem", sm: "1.5rem" },
+              lineHeight: 1.25,
+              fontWeight: 700,
+              color: "#FFFFFF",
+              letterSpacing: "-0.5px",
+              mb: 1.75,
+              textAlign: "left",
+            }}>
+              {headline}
+            </Typography>
+          )}
+
+          {/* Body Paragraphs */}
+          {isEditing ? (
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="caption" sx={{ color: "#93c5fd", fontWeight: 600, mb: 0.5, display: "block" }}>
+                Body Copy:
+              </Typography>
+              <TextareaAutosize
+                minRows={10}
+                value={fullText}
+                onChange={handleTextChange}
+                placeholder="Write or edit the newsletter body copy..."
+                style={{
+                  width: "100%",
+                  fontFamily: "Helvetica, Arial, sans-serif",
+                  fontSize: "0.9rem",
+                  lineHeight: "1.6",
+                  color: "#F2F2F2",
+                  backgroundColor: "#001b3d",
+                  border: "1.5px solid #3b82f6",
+                  borderRadius: "6px",
+                  padding: "12px 14px",
+                  outline: "none",
+                  boxSizing: "border-box",
+                  resize: "vertical",
+                  boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.15)",
+                }}
+              />
+            </Box>
+          ) : (
+            <Box>
               {paragraphs.map((para, idx) => (
                 <Typography
                   key={idx}
                   sx={{
-                    color: "#757575",
-                    fontSize: "0.9rem",
+                    fontFamily: "Helvetica, Arial, sans-serif",
+                    color: "#F2F2F2",
+                    fontSize: "0.88rem",
                     lineHeight: 1.6,
-                    mb: 1.8,
+                    mb: 1.5,
                     whiteSpace: "pre-wrap",
+                    textAlign: "left",
                   }}
                 >
                   {renderStatWithHighlight(para, highlight)}
@@ -542,73 +548,145 @@ const RenderedNewsletter = ({
               ))}
             </Box>
           )}
+        </Box>
+      </Box>
 
-          {/* CTA button — blue pill (Hardcoded static link) */}
-          <Box sx={{ textAlign: "center", mb: 2 }}>
+      {/* Middle Diagram Graphic */}
+      <Box sx={{ bgcolor: "#FFFFFF", px: { xs: 1.5, sm: 2.25 }, pb: 1.5, textAlign: "center" }}>
+        <Box
+          component="img"
+          src={DIAGRAM_IMAGE_URL}
+          alt="Cloudsfer Backup Workflow"
+          sx={{ width: "100%", maxWidth: 564, height: "auto", display: "inline-block", verticalAlign: "bottom" }}
+        />
+      </Box>
+
+      {/* Footer Area */}
+      <Box sx={{ bgcolor: "#FAFAFA", pt: 1, pb: 2 }}>
+        {/* Discovery CTA Button */}
+        <Box sx={{ px: { xs: 2, sm: 2.5 }, mb: 2 }}>
+          <Box
+            component="a"
+            href={CTA_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              display: "block",
+              width: "100%",
+              bgcolor: "#002551",
+              color: "#FFFFFF",
+              py: 1.75,
+              borderRadius: "4px",
+              fontWeight: 700,
+              fontSize: "0.95rem",
+              textDecoration: "none",
+              textAlign: "center",
+              boxSizing: "border-box",
+              transition: "background-color 0.2s ease",
+              "&:hover": { bgcolor: "#001b3d" },
+            }}
+          >
+            {CTA_LABEL}
+          </Box>
+        </Box>
+
+        {/* Ask AI About Cloudsfer Section */}
+        <Box sx={{ px: 2, py: 1, textAlign: "center" }}>
+          <Typography sx={{
+            fontFamily: "Arial, Helvetica, sans-serif",
+            fontSize: "12px",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.8px",
+            color: "#002551",
+            mb: 1.5,
+          }}>
+            Ask AI about Cloudsfer
+          </Typography>
+          <Box sx={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: 1 }}>
             <Box
               component="a"
-              href={CTA_URL}
+              href="https://chatgpt.com/?q=How%20does%20Cloudsfer%20protect%20business%20data%3F"
               target="_blank"
               rel="noopener noreferrer"
               sx={{
-                display: "inline-block",
-                bgcolor: "#2BAADF",
-                color: "#ffffff",
-                px: 3, py: 1,
-                borderRadius: "50px",
-                fontWeight: "bold",
-                fontSize: "0.85rem",
+                display: "inline-flex",
+                alignItems: "center",
+                px: 2, py: 0.75,
+                bgcolor: "#FFFFFF",
+                border: "1px solid #D6E4F5",
+                borderRadius: "999px",
+                color: "#002551",
+                fontWeight: 700,
+                fontSize: "13px",
                 textDecoration: "none",
-                "&:hover": { bgcolor: "#25a0c4" },
+                "&:hover": { bgcolor: "#f1f5f9" },
               }}
             >
-              {CTA_LABEL}
+              <Box component="img" src={CHATGPT_ICON_URL} sx={{ width: 18, height: 18, mr: 1 }} />
+              ChatGPT
+            </Box>
+            <Box
+              component="a"
+              href="https://www.google.com/search?udm=50&q=How%20does%20Cloudsfer%20protect%20business%20data%3F"
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{
+                display: "inline-flex",
+                alignItems: "center",
+                px: 2, py: 0.75,
+                bgcolor: "#FFFFFF",
+                border: "1px solid #D6E4F5",
+                borderRadius: "999px",
+                color: "#002551",
+                fontWeight: 700,
+                fontSize: "13px",
+                textDecoration: "none",
+                "&:hover": { bgcolor: "#f1f5f9" },
+              }}
+            >
+              <Box component="img" src={GEMINI_ICON_URL} sx={{ width: 18, height: 18, mr: 1 }} />
+              Gemini
+            </Box>
+            <Box
+              component="a"
+              href="https://claude.ai/new?q=How%20does%20Cloudsfer%20protect%20business%20data%3F"
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{
+                display: "inline-flex",
+                alignItems: "center",
+                px: 2, py: 0.75,
+                bgcolor: "#FFFFFF",
+                border: "1px solid #D6E4F5",
+                borderRadius: "999px",
+                color: "#002551",
+                fontWeight: 700,
+                fontSize: "13px",
+                textDecoration: "none",
+                "&:hover": { bgcolor: "#f1f5f9" },
+              }}
+            >
+              <Box component="img" src={CLAUDE_ICON_URL} sx={{ width: 18, height: 18, mr: 1 }} />
+              Claude
             </Box>
           </Box>
+        </Box>
 
-          {/* Social bar — blue (#31AFE2) with Mailchimp-style icons */}
-          <Box sx={{
-            bgcolor: "#31AFE2",
-            py: 1.25, mb: 2,
-            borderRadius: "2px",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: 1,
-          }}>
-            {SOCIAL_LINKS.map(({ name, url, icon }) => (
-              <Box
-                key={name}
-                component="a"
-                href={url}
-                title={name}
-                target="_blank"
-                rel="noopener noreferrer"
-                sx={{
-                  width: 26, height: 26,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  textDecoration: "none",
-                  flexShrink: 0,
-                  "&:hover": { opacity: 0.85 },
-                }}
-              >
-                <Box
-                  component="img"
-                  src={icon}
-                  alt={name}
-                  sx={{ width: 24, height: 24 }}
-                />
-              </Box>
-            ))}
-          </Box>
+        {/* Divider */}
+        <Box sx={{ borderTop: "2px solid #EEEEEE", mx: 2, my: 2 }} />
 
-          {/* Divider */}
-          <Box sx={{ height: 18 }} />
-        </>
-      )}
-
-      {/* Bottom rule */}
-      <Box sx={{ borderTop: "1px solid #dddddd", mt: 2 }} />
+        {/* Compliance Footer */}
+        <Box sx={{ px: 2, textAlign: "center", color: "#656565", fontSize: "12px", lineHeight: 1.5 }}>
+          <Typography variant="caption" sx={{ display: "block", color: "#656565", fontStyle: "italic", mb: 0.75 }}>
+            {FOOTER_COPYRIGHT}
+          </Typography>
+          <Typography variant="caption" sx={{ display: "block", color: "#656565" }}>
+            <strong>Our mailing address is:</strong><br />
+            {FOOTER_ADDRESS}
+          </Typography>
+        </Box>
+      </Box>
     </Box>
   );
 };

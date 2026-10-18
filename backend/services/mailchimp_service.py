@@ -32,7 +32,7 @@ logger = logging.getLogger("mailchimp_service")
 
 # ── CTA & Brand Defaults ──────────────────────────────────────────────────────
 DEFAULT_CTA_URL = getattr(settings, "NEWSLETTER_DEFAULT_CTA_URL", "https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call")
-DEFAULT_CTA_LABEL = "👉 Schedule a discovery call"
+DEFAULT_CTA_LABEL = "Schedule a discovery call now"
 
 SOCIAL_LINKS = [
     {
@@ -230,27 +230,46 @@ def get_audience_preview_details(
         session.close()
 
 
-def render_preview_merge_tags(rendered_html: str, audience_details: Optional[Dict[str, Any]] = None) -> str:
+def render_preview_merge_tags(
+    rendered_html: str,
+    audience_details: Optional[Dict[str, Any]] = None,
+    subject: str = "",
+    preview_text: str = "",
+) -> str:
     """Resolve Mailchimp-only merge tags for a local browser preview."""
     import datetime
     import html
 
     details = audience_details or {}
+    company = details.get("company") or "Cloudsfer / Tzunami Inc."
+    address = details.get("address") or "Tzunami Inc., Cloud Migration & Governance"
+
+    # Remove Mailchimp preview comments and conditional tags cleanly for browser preview
+    cleaned_html = rendered_html
+    cleaned_html = re.sub(r"<!--\*\|IF:MC_PREVIEW_TEXT\|\*-->[\s\S]*?<!--\*\|END:IF\|\*-->", "", cleaned_html)
+    cleaned_html = re.sub(r"\*\|IFNOT:ARCHIVE_PAGE\|\*", "", cleaned_html)
+    cleaned_html = re.sub(r"\*\|IF:REWARDS\|\*[\s\S]*?\*\|END:IF\|\*", "", cleaned_html)
+    cleaned_html = re.sub(r"\*\|END:IF\|\*", "", cleaned_html)
+
     replacements = {
+        "*|MC:SUBJECT|*": subject or "Industry Watch Newsletter",
+        "*|MC_PREVIEW_TEXT|*": preview_text or "",
         "*|CURRENT_YEAR|*": str(datetime.datetime.now().year),
-        "*|LIST:COMPANY|*": str(details.get("company") or "Tzunami"),
-        "*|HTML:LIST_ADDRESS_HTML|*": str(details.get("address") or "Tzunami Inc., Cloud Migration & Governance"),
-        "*|LIST:ADDRESS|*": str(details.get("address") or "Tzunami Inc., Cloud Migration & Governance"),
+        "*|LIST:COMPANY|*": str(company),
+        "*|LIST:DESCRIPTION|*": "You are receiving this email because you subscribed to industry updates.",
+        "*|HTML:LIST_ADDRESS_HTML|*": str(address),
+        "*|LIST:ADDRESS|*": str(address),
         "*|UNSUB|*": "#",
         "*|UPDATE_PROFILE|*": "#",
+        "*|HTML:REWARDS|*": "",
         "*|REWARDS|*": "",
     }
     for tag, value in replacements.items():
-        rendered_html = rendered_html.replace(tag, html.escape(value))
+        cleaned_html = cleaned_html.replace(tag, html.escape(value))
 
-    # Avoid exposing unresolved Mailchimp syntax in a local preview if a new tag is added later.
-    rendered_html = re.sub(r"\*\|[^|]+\|\*", "", rendered_html)
-    return rendered_html
+    # Strip any remaining unresolved Mailchimp tags so local preview is 100% clean
+    cleaned_html = re.sub(r"\*\|[^|]+\|\*", "", cleaned_html)
+    return cleaned_html
 
 
 def get_audience_members(
@@ -389,20 +408,23 @@ def validate_campaign_compliance(
 
 def render_newsletter_html(newsletter_dict: Dict[str, Any], image_cdn_url: Optional[str] = None) -> str:
     """
-    Renders an inline-styled, responsive HTML email strictly compliant with
+    Renders an inline-styled, responsive 1-column HTML email strictly compliant with
     Mailchimp Acceptable Use Policy and CAN-SPAM standards.
-    Includes official merge tags (*|UNSUB|*, *|HTML:LIST_ADDRESS_HTML|*, *|UPDATE_PROFILE|*).
-    Images are omitted to guarantee maximum deliverability and avoid spam/filtering issues.
+    Features:
+      - Cloudsfer preheader branding
+      - Industry Watch / Breaking News header banner
+      - High-contrast dark navy (#002551) feature card with dynamic headline and paragraphs
+      - Cloudsfer backup workflow diagram infographic
+      - Fixed dark navy Discovery Call CTA
+      - Interactive 'Ask AI about Cloudsfer' prompts (ChatGPT, Gemini, Claude)
+      - Standard Mailchimp CAN-SPAM footer merge tags
     """
-    title = str(newsletter_dict.get("title") or "TrendSense Newsletter")
     c = newsletter_dict.get("content") or {}
-
-    hook = str(c.get("hook_paragraph") or "")
-    stat = str(c.get("stat_paragraph") or "")
-    highlight = str(c.get("highlight_stat") or "")
-    context = str(c.get("context_paragraph") or "")
-    solution = str(c.get("solution_paragraph") or "")
-    cta_label = DEFAULT_CTA_LABEL
+    if isinstance(c, str):
+        try:
+            c = json.loads(c)
+        except Exception:
+            c = {}
 
     def _strip_html(s: str) -> str:
         if not s:
@@ -413,159 +435,654 @@ def render_newsletter_html(newsletter_dict: Dict[str, Any], image_cdn_url: Optio
     def _esc(s: str) -> str:
         return html.escape(_strip_html(s))
 
-    def _highlight_stat(text: str, highlight_target: str) -> str:
-        clean_text = _strip_html(text)
-        clean_target = _strip_html(highlight_target)
+    # Resolve Headline ($H_1$)
+    raw_headline = (
+        str(c.get("email_subject_line") or "").strip()
+        or str(c.get("headline") or "").strip()
+        or str(newsletter_dict.get("title") or "").strip()
+        or "Industry Watch Digest"
+    )
+    # Strip date suffix if present (e.g. " — 2026-10-18")
+    clean_headline = re.sub(r"\s*—\s*\d{4}-\d{2}-\d{2}.*$", "", raw_headline).strip() or raw_headline
+    esc_headline = _esc(clean_headline)
 
-        if not clean_target or not clean_text:
-            return f'<span style="font-size:18px">{html.escape(clean_text)}</span>'
-        escaped_target = re.escape(clean_target)
-        try:
-            parts = re.split(f"({escaped_target})", clean_text, flags=re.IGNORECASE)
-            result = []
-            for p in parts:
-                if p.lower() == clean_target.lower():
-                    result.append(f'<span style="color:#B22222;font-weight:bold;">{html.escape(p)}</span>')
-                else:
-                    result.append(f'<span style="font-size:18px">{html.escape(p)}</span>')
-            return "".join(result)
-        except Exception:
-            return f'<span style="font-size:18px">{html.escape(clean_text)}</span>'
+    # Resolve Preview Text
+    preview_snippet = _esc(
+        str(c.get("preview_text") or "").strip()
+        or str(c.get("hook_paragraph") or "")[:120].strip()
+        or clean_headline
+    )
 
-    social_cells = []
-    for s in SOCIAL_LINKS:
-        social_cells.append(f"""
-        <td align="center" valign="top" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-          <!--[if mso]><td align="center" valign="top"><![endif]-->
-          <table align="left" border="0" cellpadding="0" cellspacing="0" style="display:inline;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;">
-            <tr>
-              <td valign="top" style="padding-right:10px;padding-bottom:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                  <tr>
-                    <td align="left" valign="middle" style="padding-top:5px;padding-right:10px;padding-bottom:5px;padding-left:9px;mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                      <table align="left" border="0" cellpadding="0" cellspacing="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;float:left;">
-                        <tr>
-                          <td align="center" valign="middle" width="24" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;">
-                            <a href="{_esc(s['url'])}" target="_blank" style="mso-line-height-rule:exactly;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;"><img src="{_esc(s['icon'])}" alt="{_esc(s['name'])}" style="display:block;border:0;height:auto;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;" height="24" width="24"></a>
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-          </table>
-          <!--[if mso]></td><![endif]-->
-        </td>
-        """)
-    social_icons_html = "\n".join(social_cells)
-
+    # Resolve Body Paragraphs
     full_text = str(c.get("full_text") or c.get("body_text") or "").strip()
     if full_text:
         paras = [p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()]
-        body_paras_html = "\n".join(
-            f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;">{_highlight_stat(p, highlight)}</p>'
-            for p in paras
-        )
     else:
-        body_paras = []
-        if hook:
-            body_paras.append(f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">{_esc(hook)}</span></p>')
-        if stat:
-            body_paras.append(f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;">{_highlight_stat(stat, highlight)}</p>')
-        if context:
-            body_paras.append(f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">{_esc(context)}</span></p>')
-        if solution:
-            body_paras.append(f'<p dir="ltr" style="color:#222222;margin:14px 0;padding:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:160%;text-align:left;"><span style="font-size:18px">{_esc(solution)}</span></p>')
-        body_paras_html = "\n".join(body_paras)
+        paras = []
+        for key in ("hook_paragraph", "stat_paragraph", "context_paragraph", "solution_paragraph"):
+            val = str(c.get(key) or "").strip()
+            if val:
+                paras.append(val)
+        if not paras:
+            # Fallback to analyst_note or answer if legacy format
+            fallback_val = str(c.get("answer") or c.get("analyst_note") or c.get("description") or "").strip()
+            if fallback_val:
+                paras.append(fallback_val)
+            else:
+                paras.append("The latest developments and strategic insights in data security, cloud resilience, and governance.")
+
+    highlight = _strip_html(str(c.get("highlight_stat") or ""))
+
+    def _format_paragraph(text: str) -> str:
+        clean = _strip_html(text)
+        if not clean:
+            return ""
+        if highlight and highlight.lower() in clean.lower():
+            escaped_target = re.escape(highlight)
+            parts = re.split(f"({escaped_target})", clean, flags=re.IGNORECASE)
+            rendered_parts = []
+            for p in parts:
+                if p.lower() == highlight.lower():
+                    rendered_parts.append(f'<span style="color:#7FA9E8;font-weight:bold;">{html.escape(p)}</span>')
+                else:
+                    rendered_parts.append(html.escape(p))
+            inner_html = "".join(rendered_parts)
+        else:
+            inner_html = html.escape(clean)
+
+        return (
+            f'<p style="margin:0 0 14px 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;'
+            f'line-height:1.6;color:#F2F2F2;text-align:left;font-weight:normal;">{inner_html}</p>'
+        )
+
+    body_paras_html = "\n".join(_format_paragraph(p) for p in paras if p.strip())
 
     return f"""<!doctype html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
-  <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{_esc(title)}</title>
+    <head>
+        <!-- NAME: 1 COLUMN -->
+        <!--[if gte mso 15]>
+        <xml>
+            <o:OfficeDocumentSettings>
+            <o:AllowPNG/>
+            <o:PixelsPerInch>96</o:PixelsPerInch>
+            </o:OfficeDocumentSettings>
+        </xml>
+        <![endif]-->
+        <meta charset="UTF-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{esc_headline}</title>
+        
     <style type="text/css">
-      p{{margin:10px 0;padding:0;}}
-      table{{border-collapse:collapse;}}
-      h1,h2,h3,h4,h5,h6{{display:block;margin:0;padding:0;}}
-      img,a img{{border:0;height:auto;outline:none;text-decoration:none;}}
-      body,#bodyTable,#bodyCell{{height:100%;margin:0;padding:0;width:100%;}}
-      .mcnPreviewText{{display:none !important;}}
-      #outlook a{{padding:0;}}
-      img{{-ms-interpolation-mode:bicubic;}}
-      table{{mso-table-lspace:0pt;mso-table-rspace:0pt;}}
-      .templateContainer{{max-width:600px !important;}}
-      a.mcnButton{{display:block;}}
-      @media only screen and (min-width:768px){{.templateContainer{{width:600px !important;}}}}
-      @media only screen and (max-width:480px){{body,table,td,p,a,li,blockquote{{-webkit-text-size-adjust:none !important;}}}}
-      @media only screen and (max-width:480px){{body{{width:100% !important;min-width:100% !important;}}}}
+		p{{
+			margin:10px 0;
+			padding:0;
+		}}
+		table{{
+			border-collapse:collapse;
+		}}
+		h1,h2,h3,h4,h5,h6{{
+			display:block;
+			margin:0;
+			padding:0;
+		}}
+		img,a img{{
+			border:0;
+			height:auto;
+			outline:none;
+			text-decoration:none;
+		}}
+		body,#bodyTable,#bodyCell{{
+			height:100%;
+			margin:0;
+			padding:0;
+			width:100%;
+		}}
+		.mcnPreviewText{{
+			display:none !important;
+		}}
+		#outlook a{{
+			padding:0;
+		}}
+		img{{
+			-ms-interpolation-mode:bicubic;
+		}}
+		table{{
+			mso-table-lspace:0pt;
+			mso-table-rspace:0pt;
+		}}
+		.ReadMsgBody{{
+			width:100%;
+		}}
+		.ExternalClass{{
+			width:100%;
+		}}
+		p,a,li,td,blockquote{{
+			mso-line-height-rule:exactly;
+		}}
+		a[href^=tel],a[href^=sms]{{
+			color:inherit;
+			cursor:default;
+			text-decoration:none;
+		}}
+		p,a,li,td,body,table,blockquote{{
+			-ms-text-size-adjust:100%;
+			-webkit-text-size-adjust:100%;
+		}}
+		.ExternalClass,.ExternalClass p,.ExternalClass td,.ExternalClass div,.ExternalClass span,.ExternalClass font{{
+			line-height:100%;
+		}}
+		a[x-apple-data-detectors]{{
+			color:inherit !important;
+			text-decoration:none !important;
+			font-size:inherit !important;
+			font-family:inherit !important;
+			font-weight:inherit !important;
+			line-height:inherit !important;
+		}}
+		table[align=left]{{
+			float:left;
+		}}
+		table[align=right]{{
+			float:right;
+		}}
+		#bodyCell{{
+			padding:10px;
+		}}
+		.templateContainer{{
+			max-width:600px !important;
+		}}
+		a.mcnButton{{
+			display:block;
+		}}
+		.mcnImage,.mcnRetinaImage{{
+			vertical-align:bottom;
+		}}
+		.mcnTextContent{{
+			word-break:break-word;
+		}}
+		.mcnTextContent img{{
+			height:auto !important;
+		}}
+		.mcnDividerBlock{{
+			table-layout:fixed !important;
+		}}
+		body,#bodyTable{{
+			background-color:#FAFAFA;
+		}}
+		#bodyCell{{
+			border-top:0;
+		}}
+		.templateContainer{{
+			border:0;
+		}}
+		h1{{
+			color:#202020;
+			font-family:Helvetica;
+			font-size:26px;
+			font-style:normal;
+			font-weight:bold;
+			line-height:125%;
+			letter-spacing:normal;
+			text-align:left;
+		}}
+		h2{{
+			color:#202020;
+			font-family:Helvetica;
+			font-size:22px;
+			font-style:normal;
+			font-weight:bold;
+			line-height:125%;
+			letter-spacing:normal;
+			text-align:left;
+		}}
+		h3{{
+			color:#202020;
+			font-family:Helvetica;
+			font-size:20px;
+			font-style:normal;
+			font-weight:bold;
+			line-height:125%;
+			letter-spacing:normal;
+			text-align:left;
+		}}
+		h4{{
+			color:#202020;
+			font-family:Helvetica;
+			font-size:18px;
+			font-style:normal;
+			font-weight:bold;
+			line-height:125%;
+			letter-spacing:normal;
+			text-align:left;
+		}}
+		#templatePreheader{{
+			background-color:#FAFAFA;
+			background-image:none;
+			background-repeat:no-repeat;
+			background-position:center;
+			background-size:cover;
+			border-top:0;
+			border-bottom:0;
+			padding-top:9px;
+			padding-bottom:9px;
+		}}
+		#templatePreheader .mcnTextContent,#templatePreheader .mcnTextContent p{{
+			color:#656565;
+			font-family:Helvetica;
+			font-size:12px;
+			line-height:150%;
+			text-align:left;
+		}}
+		#templatePreheader .mcnTextContent a,#templatePreheader .mcnTextContent p a{{
+			color:#656565;
+			font-weight:normal;
+			text-decoration:underline;
+		}}
+		#templateHeader{{
+			background-color:#FFFFFF;
+			background-image:none;
+			background-repeat:no-repeat;
+			background-position:center;
+			background-size:cover;
+			border-top:0;
+			border-bottom:0;
+			padding-top:9px;
+			padding-bottom:0;
+		}}
+		#templateHeader .mcnTextContent,#templateHeader .mcnTextContent p{{
+			color:#202020;
+			font-family:Helvetica;
+			font-size:16px;
+			line-height:150%;
+			text-align:left;
+		}}
+		#templateHeader .mcnTextContent a,#templateHeader .mcnTextContent p a{{
+			color:#007C89;
+			font-weight:normal;
+			text-decoration:underline;
+		}}
+		#templateBody{{
+			background-color:#FFFFFF;
+			background-image:none;
+			background-repeat:no-repeat;
+			background-position:center;
+			background-size:cover;
+			border-top:0;
+			border-bottom:2px solid #EAEAEA;
+			padding-top:0;
+			padding-bottom:9px;
+		}}
+		#templateBody .mcnTextContent,#templateBody .mcnTextContent p{{
+			color:#202020;
+			font-family:Helvetica;
+			font-size:16px;
+			line-height:150%;
+			text-align:left;
+		}}
+		#templateBody .mcnTextContent a,#templateBody .mcnTextContent p a{{
+			color:#007C89;
+			font-weight:normal;
+			text-decoration:underline;
+		}}
+		#templateFooter{{
+			background-color:#FAFAFA;
+			background-image:none;
+			background-repeat:no-repeat;
+			background-position:center;
+			background-size:cover;
+			border-top:0;
+			border-bottom:0;
+			padding-top:9px;
+			padding-bottom:9px;
+		}}
+		#templateFooter .mcnTextContent,#templateFooter .mcnTextContent p{{
+			color:#656565;
+			font-family:Helvetica;
+			font-size:12px;
+			line-height:150%;
+			text-align:center;
+		}}
+		#templateFooter .mcnTextContent a,#templateFooter .mcnTextContent p a{{
+			color:#656565;
+			font-weight:normal;
+			text-decoration:underline;
+		}}
+		@media only screen and (min-width:768px){{
+			.templateContainer{{
+				width:600px !important;
+			}}
+		}}
+		@media only screen and (max-width: 480px){{
+			body,table,td,p,a,li,blockquote{{
+				-webkit-text-size-adjust:none !important;
+			}}
+			body{{
+				width:100% !important;
+				min-width:100% !important;
+			}}
+			.mcnRetinaImage{{
+				max-width:100% !important;
+			}}
+			.mcnImage{{
+				width:100% !important;
+			}}
+			.mcnCartContainer,.mcnCaptionTopContent,.mcnRecContentContainer,.mcnCaptionBottomContent,.mcnTextContentContainer,.mcnBoxedTextContentContainer,.mcnImageGroupContentContainer,.mcnCaptionLeftTextContentContainer,.mcnCaptionRightTextContentContainer,.mcnCaptionLeftImageContentContainer,.mcnCaptionRightImageContentContainer,.mcnImageCardLeftTextContentContainer,.mcnImageCardRightTextContentContainer,.mcnImageCardLeftImageContentContainer,.mcnImageCardRightImageContentContainer{{
+				max-width:100% !important;
+				width:100% !important;
+			}}
+			.mcnBoxedTextContentContainer{{
+				min-width:100% !important;
+			}}
+			.mcnImageGroupContent{{
+				padding:9px !important;
+			}}
+			.mcnCaptionLeftContentOuter .mcnTextContent,.mcnCaptionRightContentOuter .mcnTextContent{{
+				padding-top:9px !important;
+			}}
+			.mcnImageCardTopImageContent,.mcnCaptionBottomContent:last-child .mcnCaptionBottomImageContent,.mcnCaptionBlockInner .mcnCaptionTopContent:last-child .mcnTextContent{{
+				padding-top:18px !important;
+			}}
+			.mcnImageCardBottomImageContent{{
+				padding-bottom:9px !important;
+			}}
+			.mcnImageGroupBlockInner{{
+				padding-top:0 !important;
+				padding-bottom:0 !important;
+			}}
+			.mcnImageGroupBlockOuter{{
+				padding-top:9px !important;
+				padding-bottom:9px !important;
+			}}
+			.mcnTextContent,.mcnBoxedTextContentColumn{{
+				padding-right:18px !important;
+				padding-left:18px !important;
+			}}
+			.mcnImageCardLeftImageContent,.mcnImageCardRightImageContent{{
+				padding-right:18px !important;
+				padding-bottom:0 !important;
+				padding-left:18px !important;
+			}}
+			h1{{
+				font-size:22px !important;
+				line-height:125% !important;
+			}}
+			h2{{
+				font-size:20px !important;
+				line-height:125% !important;
+			}}
+			h3{{
+				font-size:18px !important;
+				line-height:125% !important;
+			}}
+			h4{{
+				font-size:16px !important;
+				line-height:150% !important;
+			}}
+			.mcnBoxedTextContentContainer .mcnTextContent,.mcnBoxedTextContentContainer .mcnTextContent p{{
+				font-size:14px !important;
+				line-height:150% !important;
+			}}
+			#templatePreheader{{
+				display:block !important;
+			}}
+			#templatePreheader .mcnTextContent,#templatePreheader .mcnTextContent p{{
+				font-size:14px !important;
+				line-height:150% !important;
+			}}
+			#templateHeader .mcnTextContent,#templateHeader .mcnTextContent p{{
+				font-size:16px !important;
+				line-height:150% !important;
+			}}
+			#templateBody .mcnTextContent,#templateBody .mcnTextContent p{{
+				font-size:16px !important;
+				line-height:150% !important;
+			}}
+			#templateFooter .mcnTextContent,#templateFooter .mcnTextContent p{{
+				font-size:14px !important;
+				line-height:150% !important;
+			}}
+		}}
     </style>
-  </head>
-  <body style="height:100%;margin:0;padding:0;width:100%;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%;background-color:#F7F7F7;">
-    <span class="mcnPreviewText" style="display:none;font-size:0px;line-height:0px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;visibility:hidden;mso-hide:all;">{_esc(hook[:150])}</span>
-    <center>
-      <table align="center" border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" id="bodyTable" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;height:100%;margin:0;padding:0;width:100%;background-color:#F7F7F7;">
-        <tr>
-          <td align="center" valign="top" id="bodyCell" style="height:100%;margin:0;padding:20px 0;width:100%;">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;max-width:600px !important;background-color:#FFFFFF;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);" class="templateContainer">
-              <!-- BODY -->
-              <tr>
-                <td align="center" valign="top" style="padding:32px 24px 20px 24px;">
-                  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
-                    <tr>
-                      <td valign="top" style="font-family:Helvetica,Arial,sans-serif;color:#222222;font-size:16px;line-height:150%;">
-                        {body_paras_html}
-                      </td>
-                    </tr>
-                  </table>
-                  <!-- CTA Button -->
-                  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top:20px;">
-                    <tr>
-                      <td align="center" valign="top" style="padding:12px 0;">
-                        <table border="0" cellpadding="0" cellspacing="0" style="border-radius:26px;background-color:#2BAADF;">
-                          <tr>
-                            <td align="center" valign="middle" style="font-family:Helvetica,Arial,sans-serif;font-size:16px;padding:16px 32px;">
-                              <a class="mcnButton" title="{_esc(cta_label)}" href="{DEFAULT_CTA_URL}" target="_blank" style="font-weight:bold;letter-spacing:normal;line-height:100%;text-align:center;text-decoration:none;color:#FFFFFF;display:block;">{_esc(cta_label)}</a>
-                            </td>
-                          </tr>
+    </head>
+    <body>
+        <!--*|IF:MC_PREVIEW_TEXT|*-->
+        <!--[if !gte mso 9]><!----><span class="mcnPreviewText" style="display:none; font-size:0px; line-height:0px; max-height:0px; max-width:0px; opacity:0; overflow:hidden; visibility:hidden; mso-hide:all;">*|MC_PREVIEW_TEXT|*</span><!--<![endif]-->
+        <!--*|END:IF|*-->
+        <center>
+            <table align="center" border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" id="bodyTable">
+                <tr>
+                    <td align="center" valign="top" id="bodyCell">
+                        <!-- BEGIN TEMPLATE // -->
+                        <!--[if (gte mso 9)|(IE)]>
+                        <table align="center" border="0" cellspacing="0" cellpadding="0" width="600" style="width:600px;">
+                        <tr>
+                        <td align="center" valign="top" width="600" style="width:600px;">
+                        <![endif]-->
+                        <table border="0" cellpadding="0" cellspacing="0" width="100%" class="templateContainer">
+                            <tr>
+                                <td valign="top" id="templatePreheader">
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" class="mcnImageBlock" style="min-width:100%;">
+                                        <tbody class="mcnImageBlockOuter">
+                                            <tr>
+                                                <td valign="top" style="padding:9px" class="mcnImageBlockInner">
+                                                    <table align="left" width="100%" border="0" cellpadding="0" cellspacing="0" class="mcnImageContentContainer" style="min-width:100%;">
+                                                        <tbody><tr>
+                                                            <td class="mcnImageContent" valign="top" style="padding-right: 9px; padding-left: 9px; padding-top: 0; padding-bottom: 0; text-align:center;">
+                                                                <a href="https://www.cloudsfer.com/?utm_source=mailchimp&utm_medium=email&utm_campaign=cloudsfer-brief&utm_content=logo" title="Cloudsfer" target="_blank">
+                                                                    <img align="center" alt="Cloudsfer" src="https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/250b7315-d77b-bfcd-33bf-2c9ae0f7654e.png" width="564" style="max-width:1128px; padding-bottom: 0; display: inline !important; vertical-align: bottom;" class="mcnImage">
+                                                                </a>
+                                                            </td>
+                                                        </tr></tbody>
+                                                    </table>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td valign="top" id="templateHeader">
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" class="mcnImageBlock" style="min-width:100%;">
+                                        <tbody class="mcnImageBlockOuter">
+                                            <tr>
+                                                <td valign="top" style="padding:9px" class="mcnImageBlockInner">
+                                                    <table align="left" width="100%" border="0" cellpadding="0" cellspacing="0" class="mcnImageContentContainer" style="min-width:100%;">
+                                                        <tbody><tr>
+                                                            <td class="mcnImageContent" valign="top" style="padding-right: 9px; padding-left: 9px; padding-top: 0; padding-bottom: 0; text-align:center;">
+                                                                <img align="center" alt="Industry Watch" src="https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/cbfb4578-53af-c4de-2ecd-6be9d691cafa.png" width="564" style="max-width:1128px; padding-bottom: 0; display: inline !important; vertical-align: bottom;" class="mcnImage">
+                                                            </td>
+                                                        </tr></tbody>
+                                                    </table>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td valign="top" id="templateBody">
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" class="mcnBoxedTextBlock" style="min-width:100%;">
+                                        <!--[if gte mso 9]>
+                                        <table align="center" border="0" cellspacing="0" cellpadding="0" width="100%">
+                                        <![endif]-->
+                                        <tbody class="mcnBoxedTextBlockOuter">
+                                            <tr>
+                                                <td valign="top" class="mcnBoxedTextBlockInner">
+                                                    <!--[if gte mso 9]>
+                                                    <td align="center" valign="top">
+                                                    <![endif]-->
+                                                    <table align="left" border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width:100%;" class="mcnBoxedTextContentContainer">
+                                                        <tbody><tr>
+                                                            <td style="padding-top:9px; padding-left:18px; padding-bottom:9px; padding-right:18px;">
+                                                                <table border="0" cellspacing="0" class="mcnTextContentContainer" width="100%" style="min-width: 100% !important;background-color: #002551;">
+                                                                    <tbody><tr>
+                                                                        <td valign="top" class="mcnTextContent" style="padding: 18px;color: #F2F2F2;font-family: Helvetica;font-size: 14px;font-weight: normal;text-align: center;">
+                                                                            <div style="padding:18px 14px 14px 14px; text-align:left;">
+                                                                                <div style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.8px; color:#7FA9E8; margin-bottom:12px;">INDUSTRY WATCH</div>
+                                                                                <h1 style="margin:0 0 14px 0; font-family:Arial, Helvetica, sans-serif; font-size:30px; line-height:1.2; font-weight:700; color:#FFFFFF; letter-spacing:-0.5px; text-align:left;">{esc_headline}</h1>
+                                                                                {body_paras_html}
+                                                                            </div>
+                                                                        </td>
+                                                                    </tr></tbody>
+                                                                </table>
+                                                            </td>
+                                                        </tr></tbody>
+                                                    </table>
+                                                    <!--[if gte mso 9]>
+                                                    </td>
+                                                    <![endif]-->
+                                                    <!--[if gte mso 9]>
+                                                    </tr>
+                                                    </table>
+                                                    <![endif]-->
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" class="mcnImageBlock" style="min-width:100%;">
+                                        <tbody class="mcnImageBlockOuter">
+                                            <tr>
+                                                <td valign="top" style="padding:9px" class="mcnImageBlockInner">
+                                                    <table align="left" width="100%" border="0" cellpadding="0" cellspacing="0" class="mcnImageContentContainer" style="min-width:100%;">
+                                                        <tbody><tr>
+                                                            <td class="mcnImageContent" valign="top" style="padding-right: 9px; padding-left: 9px; padding-top: 0; padding-bottom: 0; text-align:center;">
+                                                                <img align="center" alt="Cloudsfer Backup Workflow" src="https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/e21ae689-3033-6ed3-508b-8daee09088ff.png" width="564" style="max-width:1128px; padding-bottom: 0; display: inline !important; vertical-align: bottom;" class="mcnImage">
+                                                            </td>
+                                                        </tr></tbody>
+                                                    </table>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td valign="top" id="templateFooter">
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" class="mcnButtonBlock" style="min-width:100%;">
+                                        <tbody class="mcnButtonBlockOuter">
+                                            <tr>
+                                                <td style="padding-top:0; padding-right:18px; padding-bottom:18px; padding-left:18px;" valign="top" align="center" class="mcnButtonBlockInner">
+                                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" class="mcnButtonContentContainer" style="border-collapse: separate !important;border-radius: 4px;background-color: #002551;">
+                                                        <tbody>
+                                                            <tr>
+                                                                <td align="center" valign="middle" class="mcnButtonContent" style="font-family: Arial; font-size: 16px; padding: 18px;">
+                                                                    <a class="mcnButton" title="Schedule a discovery call now" href="https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call" target="_blank" style="font-weight: bold;letter-spacing: normal;line-height: 100%;text-align: center;text-decoration: none;color: #FFFFFF;">Schedule a discovery call now</a>
+                                                                </td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" class="mcnTextBlock" style="min-width:100%;">
+                                        <tbody class="mcnTextBlockOuter">
+                                            <tr>
+                                                <td valign="top" class="mcnTextBlockInner" style="padding-top:9px;">
+                                                    <!--[if mso]>
+                                                    <table align="left" border="0" cellspacing="0" cellpadding="0" width="100%" style="width:100%;">
+                                                    <tr>
+                                                    <![endif]-->
+                                                    <!--[if mso]>
+                                                    <td valign="top" width="600" style="width:600px;">
+                                                    <![endif]-->
+                                                    <table align="left" border="0" cellpadding="0" cellspacing="0" style="max-width:100%; min-width:100%;" width="100%" class="mcnTextContentContainer">
+                                                        <tbody><tr>
+                                                            <td valign="top" class="mcnTextContent" style="padding-top:0; padding-right:18px; padding-bottom:9px; padding-left:18px;">
+                                                                <div style="text-align:center; padding:8px 0 4px 0;">
+                                                                    <div style="font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.8px; color:#002551; margin-bottom:12px;">Ask AI about Cloudsfer</div>
+                                                                    <a href="https://chatgpt.com/?q=How%20does%20Cloudsfer%20protect%20business%20data%3F" style="display:inline-block; margin:0 4px 8px 4px; padding:8px 16px 8px 10px; background-color:#FFFFFF; border:1px solid #D6E4F5; border-radius:999px; font-family:Arial, Helvetica, sans-serif; font-size:13px; font-weight:700; color:#002551; text-decoration:none;" target="_blank"><img alt="" height="20" src="https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/44a6f208-f81a-4cdc-95b0-16b7544036c6.png" style="display:inline-block; width:20px; height:20px; border:0; vertical-align:middle; margin-right:8px;" width="20">ChatGPT</a>
+                                                                    <a href="https://www.google.com/search?udm=50&q=How%20does%20Cloudsfer%20protect%20business%20data%3F" style="display:inline-block; margin:0 4px 8px 4px; padding:8px 16px 8px 10px; background-color:#FFFFFF; border:1px solid #D6E4F5; border-radius:999px; font-family:Arial, Helvetica, sans-serif; font-size:13px; font-weight:700; color:#002551; text-decoration:none;" target="_blank"><img alt="" height="20" src="https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/f6532a27-013d-71ec-0f16-e263fe6cf28e.png" style="display:inline-block; width:20px; height:20px; border:0; vertical-align:middle; margin-right:8px;" width="20">Gemini</a>
+                                                                    <a href="https://claude.ai/new?q=How%20does%20Cloudsfer%20protect%20business%20data%3F" style="display:inline-block; margin:0 4px 8px 4px; padding:8px 16px 8px 10px; background-color:#FFFFFF; border:1px solid #D6E4F5; border-radius:999px; font-family:Arial, Helvetica, sans-serif; font-size:13px; font-weight:700; color:#002551; text-decoration:none;" target="_blank"><img alt="" height="20" src="https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/a8b7ef3d-9b9f-1890-a83f-5e16e1fecbdb.png" style="display:inline-block; width:20px; height:20px; border:0; vertical-align:middle; margin-right:8px;" width="20">Claude</a>
+                                                                </div>
+                                                            </td>
+                                                        </tr></tbody>
+                                                    </table>
+                                                    <!--[if mso]>
+                                                    </td>
+                                                    <![endif]-->
+                                                    <!--[if mso]>
+                                                    </tr>
+                                                    </table>
+                                                    <![endif]-->
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" class="mcnDividerBlock" style="min-width:100%;">
+                                        <tbody class="mcnDividerBlockOuter">
+                                            <tr>
+                                                <td class="mcnDividerBlockInner" style="min-width: 100%; padding: 10px 18px 25px;">
+                                                    <table class="mcnDividerContent" border="0" cellpadding="0" cellspacing="0" width="100%" style="min-width: 100%;border-top: 2px solid #EEEEEE;">
+                                                        <tbody><tr>
+                                                            <td><span></span></td>
+                                                        </tr></tbody>
+                                                    </table>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    <table border="0" cellpadding="0" cellspacing="0" width="100%" class="mcnTextBlock" style="min-width:100%;">
+                                        <tbody class="mcnTextBlockOuter">
+                                            <tr>
+                                                <td valign="top" class="mcnTextBlockInner" style="padding-top:9px;">
+                                                    <!--[if mso]>
+                                                    <table align="left" border="0" cellspacing="0" cellpadding="0" width="100%" style="width:100%;">
+                                                    <tr>
+                                                    <![endif]-->
+                                                    <!--[if mso]>
+                                                    <td valign="top" width="600" style="width:600px;">
+                                                    <![endif]-->
+                                                    <table align="left" border="0" cellpadding="0" cellspacing="0" style="max-width:100%; min-width:100%;" width="100%" class="mcnTextContentContainer">
+                                                        <tbody><tr>
+                                                            <td valign="top" class="mcnTextContent" style="padding-top:0; padding-right:18px; padding-bottom:9px; padding-left:18px;">
+                                                                <em>Copyright © *|CURRENT_YEAR|* *|LIST:COMPANY|*, All rights reserved.</em>
+                                                                <br>
+                                                                *|IFNOT:ARCHIVE_PAGE|*
+                                                                *|LIST:DESCRIPTION|*
+                                                                <br>
+                                                                <br>
+                                                                <strong>Our mailing address is:</strong>
+                                                                <br>
+                                                                *|HTML:LIST_ADDRESS_HTML|* *|END:IF|*
+                                                                <br>
+                                                                <br>
+                                                                Want to change how you receive these emails?<br>
+                                                                You can <a href="*|UPDATE_PROFILE|*">update your preferences</a> or <a href="*|UNSUB|*">unsubscribe from this list</a>.
+                                                                <br>
+                                                                <br>
+                                                                *|IF:REWARDS|* *|HTML:REWARDS|*
+                                                                *|END:IF|*
+                                                            </td>
+                                                        </tr></tbody>
+                                                    </table>
+                                                    <!--[if mso]>
+                                                    </td>
+                                                    <![endif]-->
+                                                    <!--[if mso]>
+                                                    </tr>
+                                                    </table>
+                                                    <![endif]-->
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </td>
+                            </tr>
                         </table>
-                      </td>
-                    </tr>
-                  </table>
-                  <!-- Social Bar -->
-                  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top:24px;border-radius:6px;background-color:#31AFE2;">
-                    <tr>
-                      <td align="center" valign="top" style="padding:10px 0;">
-                        <table align="center" border="0" cellpadding="0" cellspacing="0">
-                          <tr>
-                            {social_icons_html}
-                          </tr>
+                        <!--[if (gte mso 9)|(IE)]>
+                        </td>
+                        </tr>
                         </table>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-              <!-- FOOTER (CAN-SPAM / Mailchimp Merge Tags) -->
-              <tr>
-                <td align="center" valign="top" style="background-color:#333333;padding:24px 20px;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:150%;color:#FFFFFF;text-align:center;">
-                  <em>Copyright &copy; *|CURRENT_YEAR|* *|LIST:COMPANY|*. All rights reserved.</em><br><br>
-                  <strong>Our mailing address:</strong><br>
-                  *|HTML:LIST_ADDRESS_HTML|*<br><br>
-                  Want to change how you receive these emails?<br>
-                  You can <a href="*|UPDATE_PROFILE|*" style="color:#2BAADF;text-decoration:underline;">update your preferences</a> or <a href="*|UNSUB|*" style="color:#2BAADF;text-decoration:underline;">unsubscribe from this list</a>.<br><br>
-                  *|REWARDS|*
-                </td>
-              </tr>
+                        <![endif]-->
+                        <!-- // END TEMPLATE -->
+                    </td>
+                </tr>
             </table>
-          </td>
-        </tr>
-      </table>
-    </center>
-  </body>
+        </center>
+    </body>
 </html>""".strip()
 
 

@@ -21,7 +21,6 @@ import ssl
 import subprocess
 import sys
 import time
-import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -426,7 +425,7 @@ def build_newsletter_action_adaptive_card(newsletter: Any, frontend_url: str = "
     highlight_stat = str(content.get("highlight_stat") or "").strip()
     context = str(content.get("context_paragraph") or "").strip()
     solution = str(content.get("solution_paragraph") or "").strip()
-    cta_label = "👉 Schedule a discovery call"
+    cta_label = "Schedule a discovery call now"
     full_text = str(content.get("full_text") or "").strip()
     subject_line = str(content.get("email_subject_line") or title or "TrendSense Industry Digest").strip()
     preview_snippet = str(content.get("preview_text") or (content.get("hook_paragraph") or "")[:120]).strip()
@@ -739,23 +738,23 @@ def _generate_newsletter_image(prompt: str = "", api_key: str = "") -> str:
 
 
 # ── Newsletter generation prompt ──────────────────────────────────────────────
-NEWSLETTER_SYSTEM = """You are a marketing newsletter writer for Tzunami, a cloud data governance and compliance platform.
+NEWSLETTER_SYSTEM = """You are a marketing newsletter writer for Tzunami (and its cloud data migration & backup platform, Cloudsfer).
 You will receive ONE Google News article — its title, description, source, and (when available) the full article body text.
 
 Write a newsletter body in exactly 4 paragraphs, totaling 250-300 words:
 
 Paragraph1 (Hook): Introduce the problem or finding from the article in a relatable, engaging way. Make the reader feel the urgency. 2-3 sentences.
 
-Paragraph2 (Stats): Cite a specific source with concrete statistics. Format: "According to [Source Name], who [credibility statement], [statistic]..." Include one key statistic that should be highlighted in red (plain text only, DO NOT output any HTML tags). 2-3 sentences.
+Paragraph2 (Stats): Cite a specific source with concrete statistics. Format: "According to [Source Name], who [credibility statement], [statistic]..." Include one key statistic that should be highlighted (plain text only, DO NOT output any HTML tags). 2-3 sentences.
 
-Paragraph3 (Context): Connect the article's topic to current trends — AI adoption, Microsoft Copilot, compliance regulations, data security, or cloud governance. Show why this matters NOW. 2-3 sentences.
+Paragraph3 (Context): Connect the article's topic to current trends — AI adoption, Microsoft Copilot, compliance regulations, data security, cloud resilience, or cyber recovery. Show why this matters NOW. 2-3 sentences.
 
-Paragraph4 (Solution): Introduce Tzunami as the solution. Position Tzunami as the platform that gives organizations visibility and control. Be authoritative but not salesy. 2-3 sentences.
+Paragraph4 (Solution): Introduce Tzunami and Cloudsfer as the solution. Position Tzunami as the authority for enterprise data governance and visibility, and Cloudsfer for seamless cloud data migration and automated, incremental backups. Be authoritative but not salesy. 2-3 sentences.
 
 Also generate:
-- email_subject_line: A professional, engaging, high-converting email subject line (under 60 characters) strictly compliant with Mailchimp Acceptable Use and CAN-SPAM policies. AVOID ALL spam trigger words, panic/alarmist phrasing, ALL-CAPS, or clickbait (e.g. do NOT write 'URGENT', 'data breach confirmed', 'hacked', 'act now', 'alert'). Instead, frame the subject around industry insights, data governance, and strategic value (e.g. '[TrendSense] Identity Verification & Cloud Governance Trends').
+- email_subject_line: A professional, engaging, high-converting email subject line (under 60 characters) strictly compliant with Mailchimp Acceptable Use and CAN-SPAM policies. AVOID ALL spam trigger words, panic/alarmist phrasing, ALL-CAPS, or clickbait (e.g. do NOT write 'URGENT', 'data breach confirmed', 'hacked', 'act now', 'alert'). Instead, frame the subject around industry insights, data governance, and strategic value (e.g. '[Industry Watch] Microsoft 365 Data Protection & Resilience').
 - preview_text: A compelling 1-sentence inbox preview snippet (under 100 characters) that complements the subject line.
-- A short CTA button label (e.g. "👉 Schedule a discovery call")
+- A short CTA button label: "Schedule a discovery call now"
 
 Return ONLY valid JSON — no markdown, no HTML tags (no <span>, no <style>, no <font>, no <b>), no code fences:
 {
@@ -765,10 +764,10 @@ Return ONLY valid JSON — no markdown, no HTML tags (no <span>, no <style>, no 
   "stat_paragraph": "2-3 sentences with source citation and statistics",
   "source_name": "Name of the source you cited",
   "source_url": "URL to the source article or study (use the article URL if no other source)",
-  "highlight_stat": "The key statistic to display in red (e.g. '60-80%' or '3x more')",
+  "highlight_stat": "The key statistic to display (e.g. '60-80%' or '3x more')",
   "context_paragraph": "2-3 sentences connecting to current trends",
-  "solution_paragraph": "2-3 sentences introducing Tzunami as the solution",
-  "cta_label": "Button text (e.g. '👉 Schedule a discovery call')"
+  "solution_paragraph": "2-3 sentences introducing Tzunami and Cloudsfer as the solution",
+  "cta_label": "Schedule a discovery call now"
 }"""
 
 
@@ -1392,8 +1391,8 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
             "source_url": article_url,
             "highlight_stat": "",
             "context_paragraph": "",
-            "solution_paragraph": "Tzunami provides the visibility and control organizations need.",
-            "cta_label": "👉 Schedule a discovery call",
+            "solution_paragraph": "Tzunami and Cloudsfer provide the data visibility, migration, and backup control organizations need.",
+            "cta_label": "Schedule a discovery call now",
         }
 
     # Auto-sanitize all text fields to guarantee zero raw HTML tags
@@ -1402,7 +1401,7 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
             content_parsed[key] = re.sub(r"<[^>]+>", "", content_parsed[key]).strip()
 
     content_parsed["keyword"] = keyword
-    content_parsed["cta_label"] = "👉 Schedule a discovery call"
+    content_parsed["cta_label"] = "Schedule a discovery call now"
     content_parsed["cta_url"] = "https://calendly.com/d/d3q6-qmw-zp9/cloudsfer-sales-discovery-call"
 
     try:

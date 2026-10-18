@@ -198,7 +198,13 @@ def preview_newsletter_html(
         api_key=settings.MAILCHIMP_API_KEY,
         server_prefix=settings.MAILCHIMP_SERVER_PREFIX,
     )
-    rendered = render_preview_merge_tags(rendered, audience_details)
+    preview_snippet = str(content_dict.get("preview_text") or content_dict.get("hook_paragraph") or "")[:120].strip()
+    rendered = render_preview_merge_tags(
+        rendered,
+        audience_details=audience_details,
+        subject=nl.title or "Industry Watch Newsletter",
+        preview_text=preview_snippet,
+    )
 
     return HTMLResponse(content=rendered, status_code=200)
 
