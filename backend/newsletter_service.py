@@ -739,21 +739,24 @@ def _generate_newsletter_image(prompt: str = "", api_key: str = "") -> str:
 
 
 # ── Newsletter generation prompt ──────────────────────────────────────────────
-NEWSLETTER_SYSTEM = """You are a marketing newsletter writer for Tzunami (and its cloud data migration & backup platform, Cloudsfer).
+NEWSLETTER_SYSTEM = """You are a marketing newsletter writer for Cloudsfer, a cloud data backup platform.
+IMPORTANT: Write ONLY about Cloudsfer and ONLY about backup. Never mention Tzunami. Never mention or position Cloudsfer for migration (no "migrate", "migration", "move data", or "transfer" messaging) — focus exclusively on backup, recovery, data protection, and resilience.
 You will receive ONE Google News article — its title, description, source, and (when available) the full article body text.
+
+ARTICLE-FIRST RULE: The newsletter must be mostly about the extracted article. Paragraphs 1-3 must be built from the article's own topic, facts, events, companies, and figures — do not drift into generic talking points or swap in a different topic. Mirror the article's subject: if the article is about backup, talk about backup; if it is about ransomware, talk about that ransomware incident; if it is about an outage, talk about that outage; and so on. Only Paragraph4 introduces Cloudsfer, and it must tie Cloudsfer backup directly to the specific problem described in the article.
 
 Write a newsletter body in exactly 4 paragraphs, totaling 250-300 words:
 
-Paragraph1 (Hook): Introduce the problem or finding from the article in a relatable, engaging way. Make the reader feel the urgency. 2-3 sentences.
+Paragraph1 (Hook): Introduce the specific problem or finding from the article in a relatable, engaging way, using the article's own details. Make the reader feel the urgency. 2-3 sentences.
 
-Paragraph2 (Stats): Cite a specific source with concrete statistics. Format: "According to [Source Name], who [credibility statement], [statistic]..." Include one key statistic that should be highlighted (plain text only, DO NOT output any HTML tags). 2-3 sentences.
+Paragraph2 (Stats): Cite concrete statistics, preferably taken directly from the article. Format: "According to [Source Name], who [credibility statement], [statistic]..." Include one key statistic that should be highlighted (plain text only, DO NOT output any HTML tags). Do not invent statistics; if the article has none, use a well-known, relevant figure that matches the article's topic. 2-3 sentences.
 
-Paragraph3 (Context): Connect the article's topic to current trends — AI adoption, Microsoft Copilot, compliance regulations, data security, cloud resilience, or cyber recovery. Show why this matters NOW. 2-3 sentences.
+Paragraph3 (Context): Explain why the article's topic matters NOW. Mention broader trends (e.g. AI adoption, Microsoft Copilot, compliance regulations, data security, cloud resilience, cyber recovery) ONLY if they are genuinely relevant to the article — stay anchored to the article's subject. 2-3 sentences.
 
-Paragraph4 (Solution): Introduce Tzunami and Cloudsfer as the solution. Position Tzunami as the authority for enterprise data governance and visibility, and Cloudsfer for seamless cloud data migration and automated, incremental backups. Be authoritative but not salesy. 2-3 sentences.
+Paragraph4 (Solution): Introduce Cloudsfer as the solution to the specific problem from the article. Position Cloudsfer as the trusted platform for automated, incremental cloud backups and fast, reliable data recovery, and explain how that backup capability addresses the article's situation. Talk only about backup — do NOT mention migration or Tzunami. Be authoritative but not salesy. 2-3 sentences.
 
 Also generate:
-- email_subject_line: A professional, engaging, high-converting email subject line (under 60 characters) strictly compliant with Mailchimp Acceptable Use and CAN-SPAM policies. AVOID ALL spam trigger words, panic/alarmist phrasing, ALL-CAPS, or clickbait (e.g. do NOT write 'URGENT', 'data breach confirmed', 'hacked', 'act now', 'alert'). Instead, frame the subject around industry insights, data governance, and strategic value (e.g. '[Industry Watch] Microsoft 365 Data Protection & Resilience').
+- email_subject_line: A professional, engaging, high-converting email subject line (under 60 characters) strictly compliant with Mailchimp Acceptable Use and CAN-SPAM policies. AVOID ALL spam trigger words, panic/alarmist phrasing, ALL-CAPS, or clickbait (e.g. do NOT write 'URGENT', 'data breach confirmed', 'hacked', 'act now', 'alert'). Instead, base the subject on the article's actual topic, framed as an industry insight with strategic value (e.g. '[Industry Watch] Microsoft 365 Data Protection & Resilience').
 - preview_text: A compelling 1-sentence inbox preview snippet (under 100 characters) that complements the subject line.
 - A short CTA button label: "Schedule a discovery call now"
 
@@ -767,7 +770,7 @@ Return ONLY valid JSON — no markdown, no HTML tags (no <span>, no <style>, no 
   "source_url": "URL to the source article or study (use the article URL if no other source)",
   "highlight_stat": "The key statistic to display (e.g. '60-80%' or '3x more')",
   "context_paragraph": "2-3 sentences connecting to current trends",
-  "solution_paragraph": "2-3 sentences introducing Tzunami and Cloudsfer as the solution",
+  "solution_paragraph": "2-3 sentences introducing Cloudsfer backup as the solution (no migration, no Tzunami)",
   "cta_label": "Schedule a discovery call now"
 }"""
 
@@ -1392,7 +1395,7 @@ def _generate_one_newsletter(db, job_id: str, article: dict,
             "source_url": article_url,
             "highlight_stat": "",
             "context_paragraph": "",
-            "solution_paragraph": "Tzunami and Cloudsfer provide the data visibility, migration, and backup control organizations need.",
+            "solution_paragraph": "Cloudsfer provides the automated, reliable cloud backup and recovery organizations need.",
             "cta_label": "Schedule a discovery call now",
         }
 
