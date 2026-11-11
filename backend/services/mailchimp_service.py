@@ -891,7 +891,7 @@ def render_newsletter_html(newsletter_dict: Dict[str, Any], image_cdn_url: Optio
                                                     <table align="left" width="100%" border="0" cellpadding="0" cellspacing="0" class="mcnImageContentContainer" style="min-width:100%;">
                                                         <tbody><tr>
                                                             <td class="mcnImageContent" valign="top" style="padding-right: 9px; padding-left: 9px; padding-top: 0; padding-bottom: 0; text-align:center;">
-                                                                <img align="center" alt="Industry Watch" src="https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/cbfb4578-53af-c4de-2ecd-6be9d691cafa.png" width="564" style="max-width:1128px; padding-bottom: 0; display: inline !important; vertical-align: bottom;" class="mcnImage">
+                                                                <img align="center" alt="Industry Watch" src="https://mcusercontent.com/d7fecba736b28fd3375dbf5c2/images/17bf17ae-da5e-2a76-423d-0bace5568386.png" width="564" style="max-width:1128px; padding-bottom: 0; display: inline !important; vertical-align: bottom;" class="mcnImage">
                                                             </td>
                                                         </tr></tbody>
                                                     </table>
