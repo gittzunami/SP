@@ -909,10 +909,16 @@ def process_webhook_response(db, job_id: str, approved: bool,
     if not job:
         raise ValueError(f"Job {job_id} not found")
 
-    if job.status not in ("pending_approval",):
+    # A failed job that already has a saved selection can be retried (e.g. after
+    # an LLM credit/key outage) — it reuses the reviewer's original selection.
+    retrying = job.status == "failed" and bool(job.selected_articles_json)
+    if job.status != "pending_approval" and not retrying:
         raise ValueError(f"Job {job_id} already processed (status: {job.status})")
 
-    job.responded_at = _now()
+    if retrying:
+        job.error = None
+    else:
+        job.responded_at = _now()
 
     # ── Rejected ──────────────────────────────────────────────────────────────
     if not approved:
@@ -945,7 +951,11 @@ def process_webhook_response(db, job_id: str, approved: bool,
 
         # Determine which articles the user selected
         selected_articles: list[dict]
-        if response_data:
+        if retrying:
+            selected_articles = json.loads(job.selected_articles_json)
+            logger.info("Job %s: retrying with %d previously selected articles",
+                        job_id, len(selected_articles))
+        elif response_data:
             selected_indices = parse_selected_indices(response_data)
             if selected_indices is None:
                 # parse_selected_indices returns None only for "reject" — shouldn't

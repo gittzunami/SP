@@ -139,6 +139,19 @@ def get_newsletter_jobs(db: Session = Depends(get_db)):
     return {"jobs": get_all_jobs(db)}
 
 
+@router.post("/api/newsletter/jobs/{job_id}/retry")
+def retry_newsletter_job(job_id: str = FPath(...), db: Session = Depends(get_db)):
+    """Re-runs newsletter generation for a failed job using its saved article selection."""
+    from newsletter_service import process_webhook_response
+    try:
+        return process_webhook_response(db, job_id, approved=True, reason="Retry")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        logger.exception("Retry of job %s failed: %s", job_id, e)
+        raise HTTPException(500, f"Retry failed: {e}")
+
+
 @router.get("/api/newsletter/pending")
 def get_pending_newsletter_jobs(db: Session = Depends(get_db)):
     from newsletter_service import get_pending_jobs
